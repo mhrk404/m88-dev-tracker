@@ -256,55 +256,60 @@ SELECT s.id, (SELECT id FROM users WHERE username = 'td.user' LIMIT 1), '2025-02
 FROM samples s WHERE s.id = 'a1000000-0000-0000-0000-000000000005'::uuid
 ON CONFLICT (sample_id) DO NOTHING;
 
--- factory_execution: target_crossfactory_date, actual_ship_date, target_first_pc_review_date, cost_breakdown_submit_date
-INSERT INTO factory_execution (sample_id, owner_id, machine, target_crossfactory_date, actual_ship_date, target_first_pc_review_date, cost_breakdown_submit_date, sample_proceeded, awb)
-SELECT s.id, (SELECT id FROM users WHERE username = 'admin' LIMIT 1), 'Factory A', '2024-03-15', '2024-03-12', '2024-03-25', '2024-03-20', true, 'AWB-FTY-001'
+-- factory_execution: target_crossfactory_date, actual_ship_date, target_first_pc_review_date, cost_breakdown_submit_date, fty_md2, fty_costing_due_date
+INSERT INTO factory_execution (sample_id, owner_id, machine, target_crossfactory_date, actual_ship_date, target_first_pc_review_date, cost_breakdown_submit_date, sample_proceeded, awb, fty_md2, fty_costing_due_date)
+SELECT s.id, (SELECT id FROM users WHERE username = 'admin' LIMIT 1), 'Factory A', '2024-03-15', '2024-03-12', '2024-03-25', '2024-03-20', true, 'AWB-FTY-001',
+  (SELECT id FROM users WHERE username = 'md.user' LIMIT 1), '2024-03-18'
 FROM samples s WHERE s.id = 'a1000000-0000-0000-0000-000000000001'::uuid
 ON CONFLICT (sample_id) DO NOTHING;
 
-INSERT INTO factory_execution (sample_id, owner_id, machine, target_crossfactory_date, actual_ship_date, target_first_pc_review_date, cost_breakdown_submit_date, sample_proceeded, awb)
-SELECT s.id, (SELECT id FROM users WHERE username = 'admin' LIMIT 1), 'Factory X', '2024-09-01', NULL, '2024-09-15', NULL, false, NULL
+INSERT INTO factory_execution (sample_id, owner_id, machine, target_crossfactory_date, actual_ship_date, target_first_pc_review_date, cost_breakdown_submit_date, sample_proceeded, awb, fty_md2, fty_costing_due_date)
+SELECT s.id, (SELECT id FROM users WHERE username = 'admin' LIMIT 1), 'Factory X', '2024-09-01', NULL, '2024-09-15', NULL, false, NULL,
+  NULL, '2024-09-10'
 FROM samples s WHERE s.id = 'a1000000-0000-0000-0000-000000000002'::uuid
 ON CONFLICT (sample_id) DO NOTHING;
 
-INSERT INTO factory_execution (sample_id, owner_id, machine, target_crossfactory_date, actual_ship_date, target_first_pc_review_date, cost_breakdown_submit_date, sample_proceeded, awb)
-SELECT s.id, (SELECT id FROM users WHERE username = 'admin' LIMIT 1), 'Factory B', '2024-03-25', '2024-03-22', '2024-04-05', '2024-03-28', true, 'AWB-FTY-002'
+INSERT INTO factory_execution (sample_id, owner_id, machine, target_crossfactory_date, actual_ship_date, target_first_pc_review_date, cost_breakdown_submit_date, sample_proceeded, awb, fty_md2, fty_costing_due_date)
+SELECT s.id, (SELECT id FROM users WHERE username = 'admin' LIMIT 1), 'Factory B', '2024-03-25', '2024-03-22', '2024-04-05', '2024-03-28', true, 'AWB-FTY-002',
+  (SELECT id FROM users WHERE username = 'md.user' LIMIT 1), '2024-03-30'
 FROM samples s WHERE s.id = 'a1000000-0000-0000-0000-000000000003'::uuid
 ON CONFLICT (sample_id) DO NOTHING;
 
-INSERT INTO factory_execution (sample_id, owner_id, machine, target_crossfactory_date, actual_ship_date, target_first_pc_review_date, cost_breakdown_submit_date, sample_proceeded, awb)
-SELECT s.id, (SELECT id FROM users WHERE username = 'admin' LIMIT 1), 'Factory C', '2025-03-01', NULL, '2025-03-15', '2025-02-28', false, NULL
+INSERT INTO factory_execution (sample_id, owner_id, machine, target_crossfactory_date, actual_ship_date, target_first_pc_review_date, cost_breakdown_submit_date, sample_proceeded, awb, fty_md2, fty_costing_due_date)
+SELECT s.id, (SELECT id FROM users WHERE username = 'admin' LIMIT 1), 'Factory C', '2025-03-01', NULL, '2025-03-15', '2025-02-28', false, NULL,
+  NULL, '2025-03-10'
 FROM samples s WHERE s.id = 'a1000000-0000-0000-0000-000000000004'::uuid
 ON CONFLICT (sample_id) DO NOTHING;
 
-INSERT INTO factory_execution (sample_id, owner_id, machine, target_crossfactory_date, actual_ship_date, target_first_pc_review_date, cost_breakdown_submit_date, sample_proceeded, awb)
-SELECT s.id, (SELECT id FROM users WHERE username = 'admin' LIMIT 1), 'Factory A', '2025-03-20', NULL, '2025-04-01', NULL, false, NULL
+INSERT INTO factory_execution (sample_id, owner_id, machine, target_crossfactory_date, actual_ship_date, target_first_pc_review_date, cost_breakdown_submit_date, sample_proceeded, awb, fty_md2, fty_costing_due_date)
+SELECT s.id, (SELECT id FROM users WHERE username = 'admin' LIMIT 1), 'Factory A', '2025-03-20', NULL, '2025-04-01', NULL, false, NULL,
+  NULL, NULL
 FROM samples s WHERE s.id = 'a1000000-0000-0000-0000-000000000005'::uuid
 ON CONFLICT (sample_id) DO NOTHING;
 
--- merchandising_review: first_pc_review_confirmed_date, first_pc_review_complete_date, scf_shared_date
-INSERT INTO merchandising_review (sample_id, owner_id, first_pc_review_confirmed_date, first_pc_review_complete_date, scf_shared_date, first_pc_rejected, internal_review_status)
-SELECT s.id, (SELECT id FROM users WHERE username = 'md.user' LIMIT 1), '2024-03-28', '2024-04-02', '2024-04-05', false, 'Complete'
+-- merchandising_review: first_pc_review_confirmed_date, first_pc_review_complete_date, scf_shared_date, td_to_md_comment
+INSERT INTO merchandising_review (sample_id, owner_id, first_pc_review_confirmed_date, first_pc_review_complete_date, scf_shared_date, first_pc_rejected, internal_review_status, td_to_md_comment)
+SELECT s.id, (SELECT id FROM users WHERE username = 'md.user' LIMIT 1), '2024-03-28', '2024-04-02', '2024-04-05', false, 'Complete', 'TD confirmed measurements match spec.'
 FROM samples s WHERE s.id = 'a1000000-0000-0000-0000-000000000001'::uuid
 ON CONFLICT (sample_id) DO NOTHING;
 
-INSERT INTO merchandising_review (sample_id, owner_id, first_pc_review_confirmed_date, first_pc_review_complete_date, scf_shared_date, first_pc_rejected, internal_review_status)
-SELECT s.id, (SELECT id FROM users WHERE username = 'md.user' LIMIT 1), NULL, NULL, NULL, false, 'Not Started'
+INSERT INTO merchandising_review (sample_id, owner_id, first_pc_review_confirmed_date, first_pc_review_complete_date, scf_shared_date, first_pc_rejected, internal_review_status, td_to_md_comment)
+SELECT s.id, (SELECT id FROM users WHERE username = 'md.user' LIMIT 1), NULL, NULL, NULL, false, 'Not Started', NULL
 FROM samples s WHERE s.id = 'a1000000-0000-0000-0000-000000000002'::uuid
 ON CONFLICT (sample_id) DO NOTHING;
 
-INSERT INTO merchandising_review (sample_id, owner_id, first_pc_review_confirmed_date, first_pc_review_complete_date, scf_shared_date, first_pc_rejected, internal_review_status)
-SELECT s.id, (SELECT id FROM users WHERE username = 'md.user' LIMIT 1), '2024-04-10', '2024-04-12', '2024-04-15', false, 'Complete'
+INSERT INTO merchandising_review (sample_id, owner_id, first_pc_review_confirmed_date, first_pc_review_complete_date, scf_shared_date, first_pc_rejected, internal_review_status, td_to_md_comment)
+SELECT s.id, (SELECT id FROM users WHERE username = 'md.user' LIMIT 1), '2024-04-10', '2024-04-12', '2024-04-15', false, 'Complete', 'Minor fit adjustment noted by TD.'
 FROM samples s WHERE s.id = 'a1000000-0000-0000-0000-000000000003'::uuid
 ON CONFLICT (sample_id) DO NOTHING;
 
-INSERT INTO merchandising_review (sample_id, owner_id, first_pc_review_confirmed_date, first_pc_review_complete_date, scf_shared_date, first_pc_rejected, internal_review_status)
-SELECT s.id, (SELECT id FROM users WHERE username = 'md.user' LIMIT 1), NULL, NULL, NULL, false, 'In Progress'
+INSERT INTO merchandising_review (sample_id, owner_id, first_pc_review_confirmed_date, first_pc_review_complete_date, scf_shared_date, first_pc_rejected, internal_review_status, td_to_md_comment)
+SELECT s.id, (SELECT id FROM users WHERE username = 'md.user' LIMIT 1), NULL, NULL, NULL, false, 'In Progress', 'TD reviewing insulation thickness.'
 FROM samples s WHERE s.id = 'a1000000-0000-0000-0000-000000000004'::uuid
 ON CONFLICT (sample_id) DO NOTHING;
 
-INSERT INTO merchandising_review (sample_id, owner_id, first_pc_review_confirmed_date, first_pc_review_complete_date, scf_shared_date, first_pc_rejected, internal_review_status)
-SELECT s.id, (SELECT id FROM users WHERE username = 'md.user' LIMIT 1), '2025-04-05', NULL, NULL, false, 'Pending'
+INSERT INTO merchandising_review (sample_id, owner_id, first_pc_review_confirmed_date, first_pc_review_complete_date, scf_shared_date, first_pc_rejected, internal_review_status, td_to_md_comment)
+SELECT s.id, (SELECT id FROM users WHERE username = 'md.user' LIMIT 1), '2025-04-05', NULL, NULL, false, 'Pending', NULL
 FROM samples s WHERE s.id = 'a1000000-0000-0000-0000-000000000005'::uuid
 ON CONFLICT (sample_id) DO NOTHING;
 

@@ -50,14 +50,28 @@ export const updateStage = async (req, res) => {
       return res.status(403).json({ error: 'You can only update your own stage: ' + (allowedStages.join(' or ')) });
     }
     const table = stage;
-    const { data: existing } = await supabase.from(table).select('id').eq('sample_id', sampleId).maybeSingle();
+    const modifierEntry = { user_id: req.user.id, modified_at: new Date().toISOString() };
+    delete payload.modified_by_log;
+
+    const { data: existing } = await supabase.from(table).select('id, modified_by_log').eq('sample_id', sampleId).maybeSingle();
     let data;
     if (existing) {
-      const { data: updated, error } = await supabase.from(table).update(payload).eq('sample_id', sampleId).select('*').single();
+      const existingLog = Array.isArray(existing.modified_by_log) ? existing.modified_by_log : [];
+      const modifiedByLog = [...existingLog, modifierEntry];
+      const { data: updated, error } = await supabase
+        .from(table)
+        .update({ ...payload, modified_by_log: modifiedByLog })
+        .eq('sample_id', sampleId)
+        .select('*')
+        .single();
       if (error) throw error;
       data = updated;
     } else {
-      const { data: inserted, error } = await supabase.from(table).insert({ sample_id: sampleId, ...payload }).select('*').single();
+      const { data: inserted, error } = await supabase
+        .from(table)
+        .insert({ sample_id: sampleId, ...payload, modified_by_log: [modifierEntry] })
+        .select('*')
+        .single();
       if (error) throw error;
       data = inserted;
     }

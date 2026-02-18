@@ -8,7 +8,7 @@ M88 sample tracker database structure from root (mother) entities down to depend
 
 | Entity | Primary key | Notes |
 |--------|-------------|--------|
-| **roles** | `id` (serial) | USER, ADMIN, PD, MD, TD, COSTING, FACTORY |
+| **roles** | `id` (serial) | SUPER_ADMIN, ADMIN, PD, MD, TD, COSTING, FACTORY |
 | **brands** | `id` (serial) | Brand name, unique |
 | **seasons** | `id` (serial) | Unique (name, year), e.g. SS24, FW24 |
 | **divisions** | `id` (serial) | Apparel, Footwear, etc. |
@@ -44,7 +44,7 @@ One row per physical sample. Unique per `(style_number, color, season_id)`.
 |--------|-----------|--------------|
 | **product_business_dev** (Stage 1) | samples, users (`owner_id`) | One per sample |
 | **technical_design** (Stage 2) | samples, users (`owner_id`) | One per sample |
-| **factory_execution** (Stage 3) | samples, users (`owner_id`) | One per sample |
+| **factory_execution** (Stage 3) | samples, users (`owner_id`, `fty_md2`) | One per sample |
 | **merchandising_review** (Stage 4) | samples, users (`owner_id`) | One per sample |
 | **costing_analysis** (Stage 5) | samples, users (`analyst_id`, `brand_communication_owner_id`) | One per sample |
 

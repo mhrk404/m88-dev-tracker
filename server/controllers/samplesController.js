@@ -12,6 +12,39 @@ const SAMPLE_SELECT = `
   sample_types(name, "group")
 `;
 
+/** Write a field-level change to sample_history. Non-blocking on error. */
+async function recordHistory(sampleId, tableName, fieldName, oldValue, newValue, changedBy, notes = null) {
+  try {
+    await supabase.from('sample_history').insert({
+      sample_id: sampleId,
+      table_name: tableName,
+      field_name: fieldName,
+      old_value: oldValue,
+      new_value: newValue,
+      changed_by: changedBy,
+      change_notes: notes,
+    });
+  } catch (err) {
+    console.error('recordHistory failed:', err);
+  }
+}
+
+/** Write a status/stage transition. Non-blocking on error. */
+async function recordTransition(sampleId, fromStatus, toStatus, stage, transitionedBy, notes = null) {
+  try {
+    await supabase.from('status_transitions').insert({
+      sample_id: sampleId,
+      from_status: fromStatus,
+      to_status: toStatus,
+      stage: stage,
+      transitioned_by: transitionedBy,
+      notes: notes,
+    });
+  } catch (err) {
+    console.error('recordTransition failed:', err);
+  }
+}
+
 export const list = async (req, res) => {
   try {
     let q = supabase
@@ -143,6 +176,13 @@ export const create = async (req, res) => {
     }
     const { ip, userAgent } = auditMeta(req);
     await logAudit({ userId: req.user?.id, action: 'create', resource: 'sample', resourceId: data?.id, details: { style_number: data?.style_number }, ip, userAgent });
+
+    const userId = req.user?.id;
+    await recordHistory(data.id, 'samples', 'current_stage', null, payload.current_stage, userId, 'Sample created');
+    if (payload.current_status || payload.current_stage) {
+      await recordTransition(data.id, null, payload.current_status, payload.current_stage, userId, 'Sample created');
+    }
+
     return res.status(201).json(data);
   } catch (err) {
     console.error('samples create:', err);
@@ -169,14 +209,48 @@ export const update = async (req, res) => {
       }
     }
     if (Object.keys(updates).length === 0) return res.status(400).json({ error: 'No fields to update' });
+
+    const { data: oldRow } = await supabase
+      .from('samples')
+      .select('style_name, color, qty, coo, current_status, current_stage, season_id, brand_id, division_id, category_id, sample_type_id')
+      .eq('id', sampleId)
+      .maybeSingle();
+    if (!oldRow) return res.status(404).json({ error: 'Sample not found' });
+
     const { data, error } = await supabase.from('samples').update(updates).eq('id', sampleId).select(SAMPLE_SELECT).maybeSingle();
     if (error) {
       if (error.code === '23505') return res.status(409).json({ error: 'Duplicate style_number, color, season' });
       throw error;
     }
     if (!data) return res.status(404).json({ error: 'Sample not found' });
+
+    const userId = req.user?.id;
     const { ip, userAgent } = auditMeta(req);
-    await logAudit({ userId: req.user?.id, action: 'update', resource: 'sample', resourceId: sampleId, details: { keys: Object.keys(updates) }, ip, userAgent });
+    await logAudit({ userId, action: 'update', resource: 'sample', resourceId: sampleId, details: { keys: Object.keys(updates) }, ip, userAgent });
+
+    const historyPromises = [];
+    for (const key of Object.keys(updates)) {
+      const oldVal = oldRow[key] != null ? String(oldRow[key]) : null;
+      const newVal = updates[key] != null ? String(updates[key]) : null;
+      if (oldVal !== newVal) {
+        historyPromises.push(recordHistory(sampleId, 'samples', key, oldVal, newVal, userId));
+      }
+    }
+    await Promise.all(historyPromises);
+
+    if (
+      (updates.current_status !== undefined && String(updates.current_status) !== String(oldRow.current_status)) ||
+      (updates.current_stage !== undefined && String(updates.current_stage) !== String(oldRow.current_stage))
+    ) {
+      await recordTransition(
+        sampleId,
+        oldRow.current_status,
+        updates.current_status ?? oldRow.current_status,
+        updates.current_stage ?? oldRow.current_stage,
+        userId,
+      );
+    }
+
     return res.json(data);
   } catch (err) {
     console.error('samples update:', err);

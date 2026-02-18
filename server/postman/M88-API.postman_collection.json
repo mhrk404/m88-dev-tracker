@@ -388,7 +388,7 @@
                   "raw": "{\n  \"stage\": \"product_business_dev\",\n  \"sample_due_denver\": \"2024-02-01\",\n  \"sample_sent_brand_date\": \"2024-01-28\",\n  \"sample_status\": \"Submitted\"\n}"
                 },
                 "url": "{{baseUrl}}/samples/{{sampleId}}/stages",
-                "description": "Body.stage required. Each role can only update their own stage: PD→product_business_dev, MD→merchandising_review, TD→technical_design, COSTING→costing_analysis, FACTORY→factory_execution. Otherwise 403."
+                "description": "Body.stage required. Each role can only update their own stage: PD→product_business_dev, MD→merchandising_review, TD→technical_design, COSTING→costing_analysis, FACTORY→factory_execution. Otherwise 403.\n\nExtra fields: factory_execution accepts fty_md2 (user id, second FTY MD) and fty_costing_due_date (date). merchandising_review accepts td_to_md_comment (text, TD-to-MD comparison notes)."
               }
             }
           ]

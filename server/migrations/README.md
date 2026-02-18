@@ -9,10 +9,13 @@ PostgreSQL migrations for the M88 sample tracker. Run in order against your Supa
 1. **001_lookup_and_users.sql** – brands, seasons, divisions, product_categories, sample_types, users
 2. **002_samples.sql** – samples (core table)
 3. **003_stage_shipping_audit.sql** – stage tables, shipping_tracking, sample_history, status_transitions
-4. **004_roles.sql** – roles lookup (USER, ADMIN, PD, MD, TD, COSTING, FACTORY); migrates `users.role` → `users.role_id`
+4. **004_roles.sql** – roles lookup (SUPER_ADMIN, ADMIN, PD, MD, TD, COSTING, FACTORY); migrates `users.role` → `users.role_id`
 5. **005_users_password.sql** – adds `users.password_hash` for local JWT login
 6. **006_audit_log.sql** – global audit log (login, logout, and all mutations)
-7. **seed.sql** – optional reference data (brands, seasons, roles/users, divisions, categories, sample types, samples + stages)
+7. **007_remove_user_role.sql** – optional; removes USER role and reassigns users to ADMIN (run when upgrading from a DB that had USER)
+8. **008_stage_modified_by_log.sql** – adds `modified_by_log` JSONB to each stage table (array of `{ user_id, modified_at }` for everyone who modified that stage)
+9. **009_missing_csv_fields.sql** – adds `fty_md2` (second FTY MD user) and `fty_costing_due_date` to `factory_execution`; adds `td_to_md_comment` to `merchandising_review`
+10. **seed.sql** – optional reference data (brands, seasons, roles/users, divisions, categories, sample types, samples + stages)
 
 ## How to run
 
@@ -36,6 +39,9 @@ psql $DATABASE_URL -f server/migrations/003_stage_shipping_audit.sql
 psql $DATABASE_URL -f server/migrations/004_roles.sql
 psql $DATABASE_URL -f server/migrations/005_users_password.sql
 psql $DATABASE_URL -f server/migrations/006_audit_log.sql
+psql $DATABASE_URL -f server/migrations/007_remove_user_role.sql
+psql $DATABASE_URL -f server/migrations/008_stage_modified_by_log.sql
+psql $DATABASE_URL -f server/migrations/009_missing_csv_fields.sql
 psql $DATABASE_URL -f server/migrations/seed.sql
 ```
 
@@ -50,4 +56,4 @@ After running **005** and **006**, the API supports:
 - **POST /api/auth/logout** – logout (requires auth). Audits logout and returns 204.
 - **GET /api/auth/me** – current user (requires auth).
 
-All other endpoints require authentication. Role-based access: **ADMIN** (full access); **PD, MD, TD, COSTING, FACTORY** (samples, stages, shipping, lookups, analytics, export; no users/roles management); **USER** (lookups, samples read-only scoped to own + where they are owner). Mutations are audited to `audit_log`.
+All other endpoints require authentication. Role-based access: **SUPER_ADMIN / ADMIN** (full access); **PD** (create/edit samples + own stage); **MD, TD, COSTING, FACTORY** (read samples, edit own stage + shipping, analytics, export; no users/roles management). Mutations are audited to `audit_log`.

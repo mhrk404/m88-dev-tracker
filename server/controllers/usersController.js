@@ -116,6 +116,7 @@ export const remove = async (req, res) => {
       { table: 'product_business_dev', column: 'owner_id' },
       { table: 'technical_design', column: 'owner_id' },
       { table: 'factory_execution', column: 'owner_id' },
+      { table: 'factory_execution', column: 'fty_md2' },
       { table: 'merchandising_review', column: 'owner_id' },
       { table: 'costing_analysis', column: 'analyst_id' },
       { table: 'costing_analysis', column: 'brand_communication_owner_id' },
