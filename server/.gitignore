@@ -1,0 +1,27 @@
+# Dependencies
+node_modules/
+
+# Environment and secrets (never commit)
+.env
+.env.local
+.env.*.local
+
+# Lock file (uncomment to commit for reproducible installs)
+package-lock.json
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs and runtime
+logs/
+*.log
+npm-debug.log*
+
+# Build / output (if added later)
+dist/
+build/
+coverage/
+
+# Optional: Supabase local (if you use supabase start)
+.supabase/

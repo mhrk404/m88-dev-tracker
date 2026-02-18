@@ -1,0 +1,71 @@
+import { supabase } from '../config/supabase.js';
+import { logAudit, auditMeta } from '../services/auditService.js';
+import { STAGE_TABLES, getStagesForRole } from '../middleware/rbac.js';
+
+/** Ensure sample exists; return 404 if not. Stages are always scoped to a sample. */
+async function ensureSampleExists(sampleId) {
+  const { data, error } = await supabase.from('samples').select('id').eq('id', sampleId).maybeSingle();
+  if (error) throw error;
+  if (!data) return false;
+  return true;
+}
+
+export const getStages = async (req, res) => {
+  try {
+    const { sampleId } = req.params;
+    if (!sampleId) return res.status(400).json({ error: 'sampleId is required' });
+    const sampleExists = await ensureSampleExists(sampleId);
+    if (!sampleExists) return res.status(404).json({ error: 'Sample not found' });
+    const allowedStages = getStagesForRole(req.user?.roleCode);
+    const tablesToFetch = allowedStages ?? STAGE_TABLES;
+    const results = {};
+    for (const table of STAGE_TABLES) {
+      if (!tablesToFetch.includes(table)) {
+        results[table] = null;
+        continue;
+      }
+      const { data, error } = await supabase.from(table).select('*').eq('sample_id', sampleId).maybeSingle();
+      if (error) throw error;
+      results[table] = data ?? null;
+    }
+    return res.json({ sample_id: sampleId, stages: results });
+  } catch (err) {
+    console.error('stages getStages:', err);
+    return res.status(500).json({ error: err.message ?? 'Failed to get stages' });
+  }
+};
+
+export const updateStage = async (req, res) => {
+  try {
+    const { sampleId } = req.params;
+    if (!sampleId) return res.status(400).json({ error: 'sampleId is required' });
+    const sampleExists = await ensureSampleExists(sampleId);
+    if (!sampleExists) return res.status(404).json({ error: 'Sample not found' });
+    const { stage, sample_id: _bodySampleId, ...payload } = req.body;
+    if (!stage || !STAGE_TABLES.includes(stage)) {
+      return res.status(400).json({ error: 'body.stage is required and must be one of: ' + STAGE_TABLES.join(', ') });
+    }
+    const allowedStages = getStagesForRole(req.user?.roleCode);
+    if (allowedStages != null && !allowedStages.includes(stage)) {
+      return res.status(403).json({ error: 'You can only update your own stage: ' + (allowedStages.join(' or ')) });
+    }
+    const table = stage;
+    const { data: existing } = await supabase.from(table).select('id').eq('sample_id', sampleId).maybeSingle();
+    let data;
+    if (existing) {
+      const { data: updated, error } = await supabase.from(table).update(payload).eq('sample_id', sampleId).select('*').single();
+      if (error) throw error;
+      data = updated;
+    } else {
+      const { data: inserted, error } = await supabase.from(table).insert({ sample_id: sampleId, ...payload }).select('*').single();
+      if (error) throw error;
+      data = inserted;
+    }
+    const { ip, userAgent } = auditMeta(req);
+    await logAudit({ userId: req.user?.id, action: 'update', resource: 'stage', resourceId: sampleId, details: { stage: table }, ip, userAgent });
+    return res.json(data);
+  } catch (err) {
+    console.error('stages updateStage:', err);
+    return res.status(500).json({ error: err.message ?? 'Failed to update stage' });
+  }
+};
