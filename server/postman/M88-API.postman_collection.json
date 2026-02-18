@@ -2,7 +2,7 @@
   "info": {
     "name": "M88 Dev Tracker API",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
-    "description": "**Base URL:** {{baseUrl}} (default http://localhost:5000/api)\n\n**RBAC:** All endpoints except Login require **Authorization: Bearer {{token}}**. Register and users/roles management: **ADMIN or SUPER_ADMIN** only. Roles: SUPER_ADMIN, ADMIN, PD, MD, TD, COSTING, FACTORY.\n\n**Stage visibility:** PD, MD, TD, COSTING, FACTORY see sample data but only their own stage (and shipping). ADMIN and SUPER_ADMIN see all stages.\n\n**Data:** Seed brands: Vans, North Face, Marmot, Mammut, Burton. Places (COO, shipping origin/destination): Indonesia, China only.\n\n**How to test:**\n1. **Auth → Login** as admin (or pd.dev, md.user, td.user, costing.user from seed). Token is saved automatically.\n2. **Auth → Register** (ADMIN only): use to create new users; requires token from step 1.\n3. **Auth → Logout** logs out (audited); client should discard token.\n4. **Lookups → Get all lookups** for dropdowns.\n5. **Samples → List samples** (sets sampleId from first result for nested routes).\n6. Set **id** or **sampleId** / **shippingId** in collection variables as needed. Export supports ?format=csv."
+    "description": "**Base URL:** {{baseUrl}} (default http://localhost:5000/api)\n\n**RBAC:** All endpoints except Login require **Authorization: Bearer {{token}}**. Register and users/roles management: **ADMIN or SUPER_ADMIN** only. Roles: SUPER_ADMIN, ADMIN, PD, MD, TD, COSTING, FACTORY.\n\n**Sample record:** Only ADMIN, SUPER_ADMIN, PD can create, update, or delete the sample (samples table). MD, TD, COSTING, FACTORY cannot edit the sample record; they only edit their own stage table via Stages API.\n\n**Stage visibility:** PD/MD/TD/COSTING/FACTORY see only their stage when reading full/stages; ADMIN and SUPER_ADMIN see all.\n\n**Data:** Seed brands: Vans, North Face, Marmot, Mammut, Burton. Places (COO, shipping origin/destination): Indonesia, China only.\n\n**How to test:**\n1. **Auth → Login** as admin (or pd.dev, md.user, td.user, costing.user from seed). Token is saved automatically.\n2. **Auth → Register** (ADMIN only): use to create new users; requires token from step 1.\n3. **Auth → Logout** logs out (audited); client should discard token.\n4. **Lookups → Get all lookups** for dropdowns.\n5. **Samples → List samples** (sets sampleId from first result for nested routes).\n6. Set **id** or **sampleId** / **shippingId** in collection variables as needed. Export supports ?format=csv."
   },
   "variable": [
     { "key": "baseUrl", "value": "http://localhost:5000/api" },
@@ -351,7 +351,8 @@
               "mode": "raw",
               "raw": "{\n  \"style_number\": \"STYLE-001\",\n  \"style_name\": \"Classic Tee\",\n  \"color\": \"White\",\n  \"qty\": 2,\n  \"season_id\": 1,\n  \"brand_id\": 1,\n  \"division_id\": 1,\n  \"category_id\": 1,\n  \"sample_type_id\": 1,\n  \"coo\": \"Indonesia\",\n  \"current_status\": \"In Development\",\n  \"current_stage\": \"product_business_dev\",\n  \"created_by\": 1\n}"
             },
-            "url": "{{baseUrl}}/samples"
+            "url": "{{baseUrl}}/samples",
+            "description": "ADMIN, SUPER_ADMIN, PD only. MD/TD/COSTING/FACTORY get 403."
           }
         },
         {
@@ -360,10 +361,11 @@
             "method": "PUT",
             "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Authorization", "value": "Bearer {{token}}" }],
             "body": { "mode": "raw", "raw": "{\n  \"current_status\": \"Technical Design\",\n  \"current_stage\": \"technical_design\"\n}" },
-            "url": "{{baseUrl}}/samples/{{sampleId}}"
+            "url": "{{baseUrl}}/samples/{{sampleId}}",
+            "description": "ADMIN, SUPER_ADMIN, PD only. Updates the sample record. MD/TD/COSTING/FACTORY get 403 (they edit only their stage via Stages)."
           }
         },
-        { "name": "Delete sample", "request": { "method": "DELETE", "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }], "url": "{{baseUrl}}/samples/{{sampleId}}" } },
+        { "name": "Delete sample", "request": { "method": "DELETE", "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }], "url": "{{baseUrl}}/samples/{{sampleId}}", "description": "ADMIN, SUPER_ADMIN, PD only. MD/TD/COSTING/FACTORY get 403." } },
         {
           "name": "Sample – Stages",
           "item": [
@@ -386,7 +388,7 @@
                   "raw": "{\n  \"stage\": \"product_business_dev\",\n  \"sample_due_denver\": \"2024-02-01\",\n  \"sample_sent_brand_date\": \"2024-01-28\",\n  \"sample_status\": \"Submitted\"\n}"
                 },
                 "url": "{{baseUrl}}/samples/{{sampleId}}/stages",
-                "description": "stage must be: product_business_dev | technical_design | factory_execution | merchandising_review | costing_analysis. Other fields depend on stage."
+                "description": "Body.stage required. Each role can only update their own stage: PD→product_business_dev, MD→merchandising_review, TD→technical_design, COSTING→costing_analysis, FACTORY→factory_execution. Otherwise 403."
               }
             }
           ]

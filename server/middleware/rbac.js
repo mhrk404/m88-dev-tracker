@@ -34,6 +34,7 @@ export function getStagesForRole(roleCode) {
 }
 
 const ADMIN = ['ADMIN', 'SUPER_ADMIN'];
+const SAMPLE_CREATE = ['ADMIN', 'SUPER_ADMIN', 'PD']; 
 const SAMPLE_EDITORS = ['ADMIN', 'SUPER_ADMIN', 'PD', 'MD', 'TD', 'COSTING', 'FACTORY'];
 const ANALYTICS_AND_EXPORT = ['ADMIN', 'SUPER_ADMIN', 'PD', 'MD', 'TD', 'COSTING', 'FACTORY'];
 const ALL_AUTHENTICATED = ['ADMIN', 'SUPER_ADMIN', 'PD', 'MD', 'TD', 'COSTING', 'FACTORY'];
@@ -77,7 +78,21 @@ export const requireSampleRead = (req, res, next) => {
   next();
 };
 
-/** Write to samples (create/update/delete): only editors */
+/** Create sample: only ADMIN, SUPER_ADMIN, PD */
+export const requireSampleCreate = (req, res, next) => {
+  if (!req.user) return res.status(401).json({ error: 'Authentication required' });
+  if (!roleMatch(req, SAMPLE_CREATE)) return res.status(403).json({ error: 'Only Admin or PD can create samples' });
+  next();
+};
+
+/** Update/delete the sample record (samples table): only ADMIN, SUPER_ADMIN, PD. Other roles edit only their stage tables. */
+export const requireSampleUpdate = (req, res, next) => {
+  if (!req.user) return res.status(401).json({ error: 'Authentication required' });
+  if (!roleMatch(req, SAMPLE_CREATE)) return res.status(403).json({ error: 'Only Admin or PD can update or delete the sample record' });
+  next();
+};
+
+/** Write to stage tables and shipping (each role updates their own stage via stages API) */
 export const requireSampleWrite = (req, res, next) => {
   if (!req.user) return res.status(401).json({ error: 'Authentication required' });
   if (!roleMatch(req, SAMPLE_EDITORS)) return res.status(403).json({ error: 'Insufficient permissions' });

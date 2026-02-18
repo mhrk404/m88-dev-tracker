@@ -6,7 +6,8 @@ Base URL: `/api` (e.g. `http://localhost:5000/api`).
 
 **Data scope notes:**
 - **SUPER_ADMIN / ADMIN:** Full access to all endpoints and all data (users, lookups write, samples, stages, analytics, export).
-- **PD / MD / TD / COSTING / FACTORY:** Can list and open all samples; when reading stages or full sample, only their stage is populated (others null). Can only update their own stage. Can access analytics and export.
+- **PD:** Can create samples and update/delete the sample record; edits product_business_dev stage. Can access analytics and export.
+- **MD / TD / COSTING / FACTORY:** Can list and read all samples; **cannot create, update, or delete the sample record**. They only edit their own stage table (merchandising_review, technical_design, costing_analysis, factory_execution) and shipping. When reading full sample/stages, only their stage is populated. Can access analytics and export.
 
 ---
 
@@ -79,14 +80,26 @@ Base URL: `/api` (e.g. `http://localhost:5000/api`).
 
 ---
 
-## Sample editors (SUPER_ADMIN, ADMIN, PD, MD, TD, COSTING, FACTORY)
+## Sample create (SUPER_ADMIN, ADMIN, PD only)
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| POST   | `/api/samples` | Create sample. |
-| PUT    | `/api/samples/:sampleId` | Update sample. |
-| DELETE | `/api/samples/:sampleId` | Delete sample. |
-| PUT/PATCH | `/api/samples/:sampleId/stages` | Update stage (body.stage required; each role can only update their own stage). |
+| POST   | `/api/samples` | Create sample. Only Admin and PD (and Super Admin) can create. |
+
+## Sample record update/delete (SUPER_ADMIN, ADMIN, PD only)
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| PUT    | `/api/samples/:sampleId` | Update the sample record (samples table). Only Admin and PD. |
+| DELETE | `/api/samples/:sampleId` | Delete sample. Only Admin and PD. |
+
+MD, TD, COSTING, FACTORY do not edit the sample record; they only edit their own stage table (e.g. product_business_dev, technical_design) via the stages API below.
+
+## Stage tables & shipping (each role edits their own stage)
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| PUT/PATCH | `/api/samples/:sampleId/stages` | Update stage row (body.stage required; PD→product_business_dev, MD→merchandising_review, TD→technical_design, COSTING→costing_analysis, FACTORY→factory_execution). |
 | POST   | `/api/samples/:sampleId/shipping` | Create shipping record. |
 | PUT    | `/api/samples/:sampleId/shipping/:id` | Update shipping record. |
 | DELETE | `/api/samples/:sampleId/shipping/:id` | Delete shipping record. |
@@ -115,14 +128,14 @@ Base URL: `/api` (e.g. `http://localhost:5000/api`).
 
 ## Summary by role
 
-| Role        | Auth/Me | Lookups (read) | Users | Brands/Seasons/etc. (write) | Samples (read) | Samples (write) | Stages (read) | Stages (write) | Shipping | Audit (read) | Analytics & export |
-|-------------|---------|----------------|-------|-----------------------------|----------------|-----------------|---------------|----------------|----------|--------------|--------------------|
-| SUPER_ADMIN | ✅      | ✅             | ✅    | ✅                          | ✅ all         | ✅              | ✅ all        | ✅ any stage   | ✅       | ✅           | ✅                 |
-| ADMIN       | ✅      | ✅             | ✅    | ✅                          | ✅ all         | ✅              | ✅ all        | ✅ any stage   | ✅       | ✅           | ✅                 |
-| PD          | ✅      | ✅             | ❌    | ❌                          | ✅ all         | ✅              | ✅ PBD only   | ✅ PBD only    | ✅       | ✅           | ✅                 |
-| MD          | ✅      | ✅             | ❌    | ❌                          | ✅ all         | ✅              | ✅ MR only    | ✅ MR only     | ✅       | ✅           | ✅                 |
-| TD          | ✅      | ✅             | ❌    | ❌                          | ✅ all         | ✅              | ✅ TD only    | ✅ TD only     | ✅       | ✅           | ✅                 |
-| COSTING     | ✅      | ✅             | ❌    | ❌                          | ✅ all         | ✅              | ✅ CA only    | ✅ CA only     | ✅       | ✅           | ✅                 |
-| FACTORY     | ✅      | ✅             | ❌    | ❌                          | ✅ all         | ✅              | ✅ FE only    | ✅ FE only     | ✅       | ✅           | ✅                 |
+| Role        | Auth/Me | Lookups (read) | Users | Samples (read) | Sample (create) | Sample (update/delete) | Stage table (own only) | Shipping | Audit (read) | Analytics & export |
+|-------------|---------|----------------|-------|----------------|-----------------|------------------------|-------------------------|----------|--------------|--------------------|
+| SUPER_ADMIN | ✅      | ✅             | ✅    | ✅ all         | ✅              | ✅                     | ✅ any stage            | ✅       | ✅           | ✅                 |
+| ADMIN       | ✅      | ✅             | ✅    | ✅ all         | ✅              | ✅                     | ✅ any stage            | ✅       | ✅           | ✅                 |
+| PD          | ✅      | ✅             | ❌    | ✅ all         | ✅              | ✅                     | ✅ product_business_dev | ✅       | ✅           | ✅                 |
+| MD          | ✅      | ✅             | ❌    | ✅ all         | ❌              | ❌                     | ✅ merchandising_review | ✅       | ✅           | ✅                 |
+| TD          | ✅      | ✅             | ❌    | ✅ all         | ❌              | ❌                     | ✅ technical_design     | ✅       | ✅           | ✅                 |
+| COSTING     | ✅      | ✅             | ❌    | ✅ all         | ❌              | ❌                     | ✅ costing_analysis     | ✅       | ✅           | ✅                 |
+| FACTORY     | ✅      | ✅             | ❌    | ✅ all         | ❌              | ❌                     | ✅ factory_execution    | ✅       | ✅           | ✅                 |
 
 **Abbreviations:** PBD = product_business_dev, MR = merchandising_review, TD = technical_design, CA = costing_analysis, FE = factory_execution.
