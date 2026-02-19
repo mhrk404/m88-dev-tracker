@@ -1,11 +1,16 @@
 import { useEffect, useState, useCallback } from "react"
 import { useParams, useNavigate } from "react-router-dom"
-import { ArrowLeft } from "lucide-react"
+import { ArrowLeft, ChevronDown, Check } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible"
 import {
   Select,
   SelectContent,
@@ -103,6 +108,7 @@ export default function SampleStageEditPage() {
 
   const [selectedStage, setSelectedStage] = useState<StageName | null>(defaultStage)
   const [formValues, setFormValues] = useState<Record<string, string>>({})
+  const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({})
 
   const currentStage = selectedStage ?? userStage
 
@@ -144,7 +150,49 @@ export default function SampleStageEditPage() {
       initial[f.key] = fieldValueToForm(row?.[f.key], f.type)
     }
     setFormValues(initial)
+    
+    // Find first incomplete section based on loaded data and open only that one
+    const sectionFields: Record<string, typeof fields> = {}
+    fields.forEach((f) => {
+      const sectionName = f.section || "default"
+      if (!sectionFields[sectionName]) sectionFields[sectionName] = []
+      sectionFields[sectionName].push(f)
+    })
+
+    const sectionOrder = ["Setup", "Status", "Shipping", "Finalize"]
+    const orderedSections = sectionOrder.filter(name => sectionFields[name])
+
+    // Find first incomplete section based on loaded data
+    const firstIncomplete = orderedSections.find((name) => {
+      const fields = sectionFields[name]
+      return !fields.every((f) => {
+        const value = fieldValueToForm(row?.[f.key], f.type)
+        return value !== undefined && value !== null && String(value).trim() !== ""
+      })
+    })
+
+    // Set initial expanded state: only first incomplete section is open
+    const initialExpanded: Record<string, boolean> = {}
+    orderedSections.forEach((name) => {
+      initialExpanded[name] = name === firstIncomplete
+    })
+    setExpandedSections(initialExpanded)
   }, [currentStage, stagesData])
+
+  function toggleSection(sectionName: string) {
+    setExpandedSections((prev) => ({
+      ...prev,
+      [sectionName]: !prev[sectionName],
+    }))
+  }
+
+  function isSectionComplete(sectionFields: typeof fields): boolean {
+    // Check if ALL fields are filled (regardless of optional status)
+    return sectionFields.every((f) => {
+      const value = formValues[f.key]
+      return value !== undefined && value !== null && String(value).trim() !== ""
+    })
+  }
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -157,6 +205,8 @@ export default function SampleStageEditPage() {
     if (!currentStage) return false
     const fields = getStageFields(currentStage)
     const errs: Record<string, string> = {}
+    
+    // Validate filled fields for type correctness
     for (const f of fields) {
       const v = formValues[f.key]
       const hasValue = v !== undefined && v !== null && String(v).trim() !== ""
@@ -167,6 +217,7 @@ export default function SampleStageEditPage() {
       }
       if (!hasValue) continue
 
+      // Validate field types
       if (f.type === "number") {
         const n = Number(v)
         if (Number.isNaN(n)) {
@@ -193,11 +244,57 @@ export default function SampleStageEditPage() {
       toast.error(first)
       return false
     }
+
+    // Check if at least one section is completely filled (using existing isSectionComplete logic)
+    const sections: Record<string, typeof fields> = {}
+    fields.forEach((f) => {
+      const sectionName = f.section || "default"
+      if (!sections[sectionName]) sections[sectionName] = []
+      sections[sectionName].push(f)
+    })
+
+    const hasCompleteSection = Object.entries(sections).some(([sectionName, sectionFields]) => {
+      if (sectionName === "default") return true // Skip default section
+      return isSectionComplete(sectionFields)
+    })
+
+    if (!hasCompleteSection) {
+      toast.error("Complete at least one section (all fields) before saving")
+      return false
+    }
+
     return true
+  }
+
+  function canAdvanceStage(): boolean {
+    if (!currentStage) return false
+    const fields = getStageFields(currentStage)
+    
+    // Get Finalize section fields
+    const finalizeFields = fields.filter(f => f.section === "Finalize")
+    if (finalizeFields.length === 0) return false
+
+    // Check all Finalize fields are filled
+    const allFinalizeFilled = finalizeFields.every((f) => {
+      const value = formValues[f.key]
+      return value !== undefined && value !== null && String(value).trim() !== ""
+    })
+
+    // Check is_checked is true
+    const isChecked = formValues["is_checked"] === "true"
+
+    return allFinalizeFilled && isChecked
   }
 
   function confirmAndSave(moveToNext: boolean) {
     if (!id || !currentStage) return
+
+    // Validate Finalize section if trying to advance
+    if (moveToNext && !canAdvanceStage()) {
+      toast.error("Cannot advance: Complete all Finalize section fields and verify the stage")
+      setShowConfirm(false)
+      return
+    }
 
     const sampleId = id
     const stage = currentStage
@@ -415,60 +512,168 @@ export default function SampleStageEditPage() {
                   {error}
                 </div>
               )}
-              <div className="grid gap-3 sm:grid-cols-2">
-                {fields.map((f) => (
-                  <div key={f.key} className="space-y-1.5">
-                    <Label htmlFor={f.key} className="text-xs font-medium">
-                      {f.label}
-                      {!f.optional && <span className="text-destructive ml-1">*</span>}
-                    </Label>
-                    {f.type === "text" && (
-                      <Input
-                        id={f.key}
-                        value={formValues[f.key] ?? ""}
-                        onChange={(e) => setFormValues((prev) => ({ ...prev, [f.key]: e.target.value }))}
-                        className="h-8 text-sm"
-                      />
-                    )}
-                    {f.type === "date" && (
-                      <Input
-                        id={f.key}
-                        type="date"
-                        value={valueToString(formValues[f.key]).slice(0, 10)}
-                        onChange={(e) => setFormValues((prev) => ({ ...prev, [f.key]: e.target.value }))}
-                        className="h-8"
-                      />
-                    )}
-                    {f.type === "number" && (
-                      <Input
-                        id={f.key}
-                        type="number"
-                        value={formValues[f.key] ?? ""}
-                        onChange={(e) => setFormValues((prev) => ({ ...prev, [f.key]: e.target.value }))}
-                        className="h-8 text-sm"
-                      />
-                    )}
-                    {f.type === "boolean" && (
-                      <Select
-                        value={formValues[f.key] || "none"}
-                        onValueChange={(v) => setFormValues((prev) => ({ ...prev, [f.key]: v === "none" ? "" : v }))}
-                      >
-                        <SelectTrigger id={f.key} className="h-8">
-                          <SelectValue placeholder="Select" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="none">—</SelectItem>
-                          <SelectItem value="true">Yes</SelectItem>
-                          <SelectItem value="false">No</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    )}
-                    {fieldErrors[f.key] && (
-                      <p className="text-destructive text-xs">{fieldErrors[f.key]}</p>
-                    )}
-                  </div>
-                ))}
-              </div>
+              {(() => {
+                // Group fields by section
+                const sections: Record<string, typeof fields> = {}
+                fields.forEach((f) => {
+                  const sectionName = f.section || "default"
+                  if (!sections[sectionName]) sections[sectionName] = []
+                  sections[sectionName].push(f)
+                })
+
+                // Define section order for chronological expansion
+                const sectionOrder = ["Setup", "Status", "Shipping", "Finalize", "default"]
+                const orderedSections = sectionOrder
+                  .filter(name => sections[name])
+                  .map(name => [name, sections[name]] as const)
+
+                return orderedSections.map(([sectionName, sectionFields]) => {
+                  // Default section always expanded, others managed by expandedSections state
+                  const isExpanded = sectionName === "default" 
+                    ? true 
+                    : (expandedSections[sectionName] ?? false)
+                  const isComplete = isSectionComplete(sectionFields)
+                  
+                  if (sectionName === "default") {
+                    return (
+                      <div key={sectionName} className="grid gap-3 sm:grid-cols-2">
+                        {sectionFields.map((f) => (
+                          <div key={f.key} className="space-y-1.5">
+                            <Label htmlFor={f.key} className="text-xs font-medium">
+                              {f.label}
+                              {!f.optional && <span className="text-destructive ml-1">*</span>}
+                            </Label>
+                            {f.type === "text" && (
+                              <Input
+                                id={f.key}
+                                value={formValues[f.key] ?? ""}
+                                onChange={(e) => setFormValues((prev) => ({ ...prev, [f.key]: e.target.value }))}
+                                className="h-8 text-sm"
+                              />
+                            )}
+                            {f.type === "date" && (
+                              <Input
+                                id={f.key}
+                                type="date"
+                                value={valueToString(formValues[f.key]).slice(0, 10)}
+                                onChange={(e) => setFormValues((prev) => ({ ...prev, [f.key]: e.target.value }))}
+                                className="h-8"
+                              />
+                            )}
+                            {f.type === "number" && (
+                              <Input
+                                id={f.key}
+                                type="number"
+                                value={formValues[f.key] ?? ""}
+                                onChange={(e) => setFormValues((prev) => ({ ...prev, [f.key]: e.target.value }))}
+                                className="h-8 text-sm"
+                              />
+                            )}
+                            {f.type === "boolean" && (
+                              <Select
+                                value={formValues[f.key] || "none"}
+                                onValueChange={(v) => setFormValues((prev) => ({ ...prev, [f.key]: v === "none" ? "" : v }))}
+                              >
+                                <SelectTrigger id={f.key} className="h-8">
+                                  <SelectValue placeholder="Select" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="none">—</SelectItem>
+                                  <SelectItem value="true">Yes</SelectItem>
+                                  <SelectItem value="false">No</SelectItem>
+                                </SelectContent>
+                              </Select>
+                            )}
+                            {fieldErrors[f.key] && (
+                              <p className="text-destructive text-xs">{fieldErrors[f.key]}</p>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    )
+                  }
+                  
+                  return (
+                    <Collapsible
+                      key={sectionName}
+                      open={isExpanded}
+                      onOpenChange={() => toggleSection(sectionName)}
+                      className="space-y-3"
+                    >
+                      <CollapsibleTrigger className="flex items-center justify-between gap-2 text-sm font-semibold text-foreground border-b pb-1 w-full hover:text-primary transition-colors">
+                        <div className="flex items-center gap-2">
+                          <ChevronDown
+                            className={`h-4 w-4 transition-transform ${isExpanded ? "" : "-rotate-90"}`}
+                          />
+                          {sectionName}
+                        </div>
+                        {isComplete && (
+                          <div className="flex items-center gap-1 text-emerald-600">
+                            <Check className="h-4 w-4" />
+                            <span className="text-xs font-normal">Complete</span>
+                          </div>
+                        )}
+                      </CollapsibleTrigger>
+                      <CollapsibleContent className="space-y-3">
+                        <div className="grid gap-3 sm:grid-cols-2">
+                          {sectionFields.map((f) => (
+                            <div key={f.key} className="space-y-1.5">
+                              <Label htmlFor={f.key} className="text-xs font-medium">
+                                {f.label}
+                                {!f.optional && <span className="text-destructive ml-1">*</span>}
+                              </Label>
+                              {f.type === "text" && (
+                                <Input
+                                  id={f.key}
+                                  value={formValues[f.key] ?? ""}
+                                  onChange={(e) => setFormValues((prev) => ({ ...prev, [f.key]: e.target.value }))}
+                                  className="h-8 text-sm"
+                                />
+                              )}
+                              {f.type === "date" && (
+                                <Input
+                                  id={f.key}
+                                  type="date"
+                                  value={valueToString(formValues[f.key]).slice(0, 10)}
+                                  onChange={(e) => setFormValues((prev) => ({ ...prev, [f.key]: e.target.value }))}
+                                  className="h-8"
+                                />
+                              )}
+                              {f.type === "number" && (
+                                <Input
+                                  id={f.key}
+                                  type="number"
+                                  value={formValues[f.key] ?? ""}
+                                  onChange={(e) => setFormValues((prev) => ({ ...prev, [f.key]: e.target.value }))}
+                                  className="h-8 text-sm"
+                                />
+                              )}
+                              {f.type === "boolean" && (
+                                <Select
+                                  value={formValues[f.key] || "none"}
+                                  onValueChange={(v) => setFormValues((prev) => ({ ...prev, [f.key]: v === "none" ? "" : v }))}
+                                >
+                                  <SelectTrigger id={f.key} className="h-8">
+                                    <SelectValue placeholder="Select" />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="none">—</SelectItem>
+                                    <SelectItem value="true">Yes</SelectItem>
+                                    <SelectItem value="false">No</SelectItem>
+                                  </SelectContent>
+                                </Select>
+                              )}
+                              {fieldErrors[f.key] && (
+                                <p className="text-destructive text-xs">{fieldErrors[f.key]}</p>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      </CollapsibleContent>
+                    </Collapsible>
+                  )
+                })
+              })()}
               <div className="flex gap-2 pt-1">
                 <Button type="submit" disabled={saving} size="sm">
                   {saving ? "Saving..." : "Save Stage"}
@@ -488,9 +693,14 @@ export default function SampleStageEditPage() {
             <AlertDialogTitle>Confirm update</AlertDialogTitle>
             <AlertDialogDescription>
               Update <span className="font-medium text-foreground">{currentStage ? (STAGE_LABELS[currentStage] ?? currentStage) : "stage"}</span> data? You have 7 seconds to undo.
-              {currentStage && getNextStage(currentStage) && (
+              {currentStage && getNextStage(currentStage) && canAdvanceStage() && (
                 <div className="mt-2 text-sm text-foreground">
-                  You can also advance to <span className="font-medium">{STAGE_LABELS[getNextStage(currentStage)!] ?? getNextStage(currentStage)}</span>.
+                  You can advance to <span className="font-medium">{STAGE_LABELS[getNextStage(currentStage)!] ?? getNextStage(currentStage)}</span> (Finalize section is complete).
+                </div>
+              )}
+              {currentStage && getNextStage(currentStage) && !canAdvanceStage() && (
+                <div className="mt-2 text-sm text-muted-foreground">
+                  Complete Finalize section and verify to enable advancing.
                 </div>
               )}
             </AlertDialogDescription>
@@ -504,8 +714,11 @@ export default function SampleStageEditPage() {
               Save Only
             </AlertDialogAction>
             {currentStage && getNextStage(currentStage) && (
-              <AlertDialogAction onClick={() => confirmAndSave(true)}>
-                Save &amp; Advance
+              <AlertDialogAction 
+                onClick={() => confirmAndSave(true)}
+                disabled={!canAdvanceStage()}
+              >
+                Complete &amp; Advance
               </AlertDialogAction>
             )}
           </AlertDialogFooter>

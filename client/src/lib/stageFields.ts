@@ -8,6 +8,7 @@ export interface StageFieldConfig {
   label: string
   type: StageFieldType
   optional?: boolean
+  section?: string
 }
 
 const SKIP_KEYS = new Set(["id", "sample_id", "created_at", "updated_at", "modified_by_log"])
@@ -23,19 +24,22 @@ export const STAGE_FIELDS: Record<StageName, StageFieldConfig[]> = {
     { key: "is_checked", label: "Stage Checked / Verified", type: "boolean", optional: true },
   ],
   [STAGES.SAMPLE_DEVELOPMENT]: [
-    { key: "tp_handoff_td", label: "TP Handoff TD", type: "date", optional: true },
-    { key: "fit_log_review", label: "Fit log review", type: "text", optional: true },
-    { key: "fty_md", label: "FTY MD", type: "text", optional: true },
-    { key: "fty_machine", label: "FTY machine", type: "text", optional: true },
-    { key: "p3_reason", label: "P3 reason", type: "text", optional: true },
-    { key: "remake_reason", label: "Remake reason", type: "text", optional: true },
-    { key: "target_xfty", label: "Target X-FTY", type: "date", optional: true },
-    { key: "actual_send", label: "Actual send", type: "date", optional: true },
-    { key: "fty_remark", label: "FTY remark", type: "text", optional: true },
-    { key: "proceeded_date", label: "Proceeded date", type: "date", optional: true },
-    { key: "awb", label: "AWB", type: "text", optional: true },
-    { key: "denver_status", label: "Denver status", type: "text", optional: true },
-    { key: "is_checked", label: "Stage Checked / Verified", type: "boolean", optional: true },
+    // Setup
+    { key: "fty_md", label: "FTY MD", type: "text", optional: true, section: "Setup" },
+    { key: "fty_machine", label: "Machine", type: "text", optional: true, section: "Setup" },
+    { key: "fty_target_sample", label: "FTY Target Sample", type: "date", optional: true, section: "Setup" },
+    { key: "target_xfty", label: "Xfactory Date", type: "date", optional: true, section: "Setup" },
+    // Status
+    { key: "sample_proceeded", label: "Sample Proceeded", type: "boolean", optional: true, section: "Status" },
+    { key: "fty_remark", label: "FTY REMARK (Add Date)", type: "text", optional: true, section: "Status" },
+    { key: "fty_psi_btp_discrepancy", label: "FTY PSI/BTP Discrepancy", type: "text", optional: true, section: "Status" },
+    // Shipping
+    { key: "actual_send", label: "Actual Send Date", type: "date", optional: true, section: "Shipping" },
+    { key: "awb", label: "AWB", type: "text", optional: true, section: "Shipping" },
+    // Finalize
+    { key: "target_1pc_review_date", label: "Target 1st PC Review Date", type: "date", optional: true, section: "Finalize" },
+    { key: "actual_cbd_submitted_date", label: "Actual CBD Submitted Date", type: "date", optional: true, section: "Finalize" },
+    { key: "is_checked", label: "Stage Checked / Verified", type: "boolean", optional: true, section: "Finalize" },
   ],
   [STAGES.PC_REVIEW]: [
     { key: "target_1pc", label: "Target 1PC", type: "date", optional: true },
