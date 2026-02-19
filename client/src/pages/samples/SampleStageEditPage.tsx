@@ -376,6 +376,14 @@ export default function SampleStageEditPage() {
 
         if (moveToNext && nextStage) {
           sampleUpdatePayload.current_stage = nextStage
+          if (!sampleUpdatePayload.current_status) {
+            sampleUpdatePayload.current_status = String(nextStage).toUpperCase()
+          }
+        } else if (!sampleUpdatePayload.current_status) {
+          const existingStatus = sample?.current_status?.toUpperCase() ?? ""
+          if (!existingStatus || existingStatus === "INITIATED") {
+            sampleUpdatePayload.current_status = String(stage).toUpperCase()
+          }
         }
 
         if (Object.keys(sampleUpdatePayload).length > 0) {
