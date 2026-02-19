@@ -3,7 +3,7 @@ import { logAudit, auditMeta } from '../services/auditService.js';
 
 export const list = async (req, res) => {
   try {
-    const { data, error } = await supabase.from('seasons').select('*').order('year', { ascending: false }).order('name');
+    const { data, error } = await supabase.from('seasons').select('*').order('year', { ascending: false }).order('code');
     if (error) throw error;
     return res.json(data ?? []);
   } catch (err) {
@@ -28,16 +28,16 @@ export const getOne = async (req, res) => {
 
 export const create = async (req, res) => {
   try {
-    const { name, year, start_date, end_date, is_active = true } = req.body;
-    if (!name?.trim()) return res.status(400).json({ error: 'name is required' });
+    const { code, year, start_date, end_date, is_active = true } = req.body;
+    if (!code?.trim()) return res.status(400).json({ error: 'code is required' });
     if (year == null) return res.status(400).json({ error: 'year is required' });
     const { data, error } = await supabase
       .from('seasons')
-      .insert({ name: name.trim(), year: Number(year), start_date: start_date || null, end_date: end_date || null, is_active: !!is_active })
+      .insert({ code: code.trim(), year: Number(year), start_date: start_date || null, end_date: end_date || null, is_active: !!is_active })
       .select('*')
       .single();
     if (error) {
-      if (error.code === '23505') return res.status(409).json({ error: 'Season with this name and year already exists' });
+      if (error.code === '23505') return res.status(409).json({ error: 'Season with this code and year already exists' });
       throw error;
     }
     const { ip, userAgent } = auditMeta(req);
@@ -53,9 +53,9 @@ export const update = async (req, res) => {
   try {
     const id = Number(req.params.id);
     if (Number.isNaN(id)) return res.status(400).json({ error: 'Invalid id' });
-    const { name, year, start_date, end_date, is_active } = req.body;
+    const { code, year, start_date, end_date, is_active } = req.body;
     const updates = {};
-    if (name !== undefined) updates.name = name.trim();
+    if (code !== undefined) updates.code = code.trim();
     if (year !== undefined) updates.year = Number(year);
     if (start_date !== undefined) updates.start_date = start_date || null;
     if (end_date !== undefined) updates.end_date = end_date || null;
@@ -63,7 +63,7 @@ export const update = async (req, res) => {
     if (Object.keys(updates).length === 0) return res.status(400).json({ error: 'No fields to update' });
     const { data, error } = await supabase.from('seasons').update(updates).eq('id', id).select('*').maybeSingle();
     if (error) {
-      if (error.code === '23505') return res.status(409).json({ error: 'Season with this name and year already exists' });
+      if (error.code === '23505') return res.status(409).json({ error: 'Season with this code and year already exists' });
       throw error;
     }
     if (!data) return res.status(404).json({ error: 'Season not found' });

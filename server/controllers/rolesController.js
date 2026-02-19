@@ -28,18 +28,19 @@ export const getOne = async (req, res) => {
 
 export const create = async (req, res) => {
   try {
-    const { name, code, is_active = true } = req.body;
-    if (!name?.trim()) return res.status(400).json({ error: 'name is required' });
-    if (!code?.trim()) return res.status(400).json({ error: 'code is required' });
-    const { data, error } = await supabase
-      .from('roles')
-      .insert({ name: name.trim(), code: code.trim().toUpperCase(), is_active: !!is_active })
-      .select('*')
-      .single();
+    const { code, name, is_active = true } = req.body;
+    if (!code?.trim() || !name?.trim()) return res.status(400).json({ error: 'code and name are required' });
+    const { data, error } = await supabase.from('roles').insert({
+      code: code.trim().toUpperCase(),
+      name: name.trim(),
+      is_active: !!is_active,
+    }).select('*').single();
     if (error) {
-      if (error.code === '23505') return res.status(409).json({ error: 'Role with this name or code already exists' });
+      if (error.code === '23505') return res.status(409).json({ error: 'Role with this code already exists' });
       throw error;
     }
+    const { ip, userAgent } = auditMeta(req);
+    await logAudit({ userId: req.user?.id, action: 'create', resource: 'role', resourceId: String(data?.id), details: { code: data?.code }, ip, userAgent });
     return res.status(201).json(data);
   } catch (err) {
     console.error('roles create:', err);
@@ -51,15 +52,15 @@ export const update = async (req, res) => {
   try {
     const id = Number(req.params.id);
     if (Number.isNaN(id)) return res.status(400).json({ error: 'Invalid id' });
-    const { name, code, is_active } = req.body;
+    const { code, name, is_active } = req.body;
     const updates = {};
-    if (name !== undefined) updates.name = name.trim();
     if (code !== undefined) updates.code = code.trim().toUpperCase();
+    if (name !== undefined) updates.name = name.trim();
     if (is_active !== undefined) updates.is_active = !!is_active;
     if (Object.keys(updates).length === 0) return res.status(400).json({ error: 'No fields to update' });
     const { data, error } = await supabase.from('roles').update(updates).eq('id', id).select('*').maybeSingle();
     if (error) {
-      if (error.code === '23505') return res.status(409).json({ error: 'Role with this name or code already exists' });
+      if (error.code === '23505') return res.status(409).json({ error: 'Role with this code already exists' });
       throw error;
     }
     if (!data) return res.status(404).json({ error: 'Role not found' });

@@ -3,23 +3,24 @@
 export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:5000/api"
 
 export const ROLES = {
-  SUPER_ADMIN: "SUPER_ADMIN",
   ADMIN: "ADMIN",
-  PD: "PD",
+  PBD: "PBD",
   MD: "MD",
   TD: "TD",
   COSTING: "COSTING",
-  FACTORY: "FACTORY",
+  FTY: "FTY",
+  BRAND: "BRAND",
 } as const
 
 export type RoleCode = typeof ROLES[keyof typeof ROLES]
 
 export const STAGES = {
-  PRODUCT_BUSINESS_DEV: "product_business_dev",
-  TECHNICAL_DESIGN: "technical_design",
-  FACTORY_EXECUTION: "factory_execution",
-  MERCHANDISING_REVIEW: "merchandising_review",
-  COSTING_ANALYSIS: "costing_analysis",
+  PSI: "psi",
+  SAMPLE_DEVELOPMENT: "sample_development",
+  PC_REVIEW: "pc_review",
+  COSTING: "costing",
+  SCF: "scf",
+  SHIPMENT_TO_BRAND: "shipment_to_brand",
 } as const
 
 export type StageName = typeof STAGES[keyof typeof STAGES]

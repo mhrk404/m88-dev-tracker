@@ -24,6 +24,10 @@ function getBreadcrumbs(pathname: string) {
     
     if (pathname === "/samples/new") {
       crumbs.push({ label: "Create", path: "/samples/new" })
+    } else if (pathname.includes("stage-edit")) {
+      const id = pathname.split("/")[2]
+      crumbs.push({ label: "Details", path: `/samples/${id}` })
+      crumbs.push({ label: "Edit stage", path: pathname })
     } else if (pathname.includes("/edit")) {
       const id = pathname.split("/")[2]
       crumbs.push({ label: "Details", path: `/samples/${id}` })

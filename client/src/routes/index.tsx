@@ -9,6 +9,8 @@ import SamplesListPage from "@/pages/samples/SamplesListPage"
 import SampleDetailPage from "@/pages/samples/SampleDetailPage"
 import SampleCreatePage from "@/pages/samples/SampleCreatePage"
 import SampleEditPage from "@/pages/samples/SampleEditPage"
+import SampleStageEditPage from "@/pages/samples/SampleStageEditPage"
+import AnalyticsPage from "@/pages/analytics/AnalyticsPage"
 import HelpPage from "@/pages/help/HelpPage"
 import NotFoundPage from "@/pages/not-found/NotFoundPage"
 
@@ -34,6 +36,10 @@ export const router = createBrowserRouter([
         element: <DashboardPage />,
       },
       {
+        path: "analytics",
+        element: <AnalyticsPage />,
+      },
+      {
         path: "samples",
         element: <SamplesListPage />,
       },
@@ -48,6 +54,10 @@ export const router = createBrowserRouter([
       {
         path: "samples/:id/edit",
         element: <SampleEditPage />,
+      },
+      {
+        path: "samples/:id/stage-edit",
+        element: <SampleStageEditPage />,
       },
       {
         path: "users",

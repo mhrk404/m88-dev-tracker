@@ -125,15 +125,15 @@ client/
 | Route | Page | Auth | Role note |
 |-------|------|------|-----------|
 | `/login` | LoginPage | No | — |
-| `/register` | RegisterPage | Yes | ADMIN / SUPER_ADMIN |
+| `/register` | RegisterPage | Yes | ADMIN |
 | `/` | Redirect or Dashboard | Yes | All |
 | `/dashboard` | DashboardPage | Yes | All |
 | `/samples` | SamplesListPage | Yes | All |
-| `/samples/new` | SampleFormPage | Yes | PD, ADMIN, SUPER_ADMIN |
+| `/samples/new` | SampleFormPage | Yes | PBD, ADMIN |
 | `/samples/:id` | SampleDetailPage | Yes | All (stage edit by role) |
-| `/samples/:id/edit` | SampleFormPage | Yes | PD, ADMIN, SUPER_ADMIN |
-| `/users` | UsersPage | Yes | ADMIN, SUPER_ADMIN |
-| `/lookups` | LookupsPage | Yes | ADMIN, SUPER_ADMIN |
+| `/samples/:id/edit` | SampleFormPage | Yes | PBD, ADMIN |
+| `/users` | UsersPage | Yes | ADMIN |
+| `/lookups` | LookupsPage | Yes | ADMIN |
 | `*` | NotFoundPage | — | — |
 
 ---

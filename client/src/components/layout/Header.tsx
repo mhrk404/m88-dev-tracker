@@ -23,9 +23,8 @@ function getPageTitle(pathname: string): string {
 
   // Check for dynamic routes (e.g., /samples/:id)
   if (pathname.startsWith("/samples/")) {
-    if (pathname.includes("/edit")) {
-      return "Edit Sample"
-    }
+    if (pathname.includes("stage-edit")) return "Edit stage"
+    if (pathname.includes("/edit")) return "Edit Sample"
     return "Sample Details"
   }
 

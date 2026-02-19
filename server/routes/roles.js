@@ -11,4 +11,5 @@ router.get('/:id', requireAuth, ctrl.getOne);
 router.post('/', requireAdmin, ctrl.create);
 router.put('/:id', requireAdmin, ctrl.update);
 router.delete('/:id', requireAdmin, ctrl.remove);
+
 export default router;

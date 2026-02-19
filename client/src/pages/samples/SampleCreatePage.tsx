@@ -29,19 +29,31 @@ export default function SampleCreatePage() {
   const [lookups, setLookups] = useState<Lookups | null>(null)
   const [importing, setImporting] = useState(false)
   const importInputRef = useRef<HTMLInputElement | null>(null)
-  const [formData, setFormData] = useState<CreateSampleInput>({
+
+  // Flat form data for easier binding
+  const [formData, setFormData] = useState<any>({
     style_number: "",
     style_name: "",
     color: "",
     qty: undefined,
-    season_id: 0,
-    brand_id: 0,
-    division_id: 0,
-    category_id: 0,
-    sample_type_id: 0,
+    season_id: undefined,
+    brand_id: undefined,
+    division: "",
+    product_category: "",
+    sample_type: "",
+    sample_type_group: "",
     coo: "",
+    unfree_status: "",
+    sample_status: "Active",
+    kickoff_date: "",
+    sample_due_denver: "",
+    requested_lead_time: undefined,
+    lead_time_type: "Weeks",
+    ref_from_m88: "No",
+    ref_sample_to_fty: "No",
+    additional_notes: "",
     current_status: "Pending",
-    current_stage: STAGES.PRODUCT_BUSINESS_DEV,
+    current_stage: STAGES.SAMPLE_DEVELOPMENT,
   })
 
   useEffect(() => {
@@ -69,30 +81,94 @@ export default function SampleCreatePage() {
       return
     }
 
-    if (
-      !formData.season_id ||
-      !formData.brand_id ||
-      !formData.division_id ||
-      !formData.category_id ||
-      !formData.sample_type_id
-    ) {
-      toast.error("Please fill in all required fields")
+    if (!formData.style_name || !formData.style_name.trim()) {
+      toast.error("Style name is required")
+      return
+    }
+
+    if (!formData.color || !formData.color.trim()) {
+      toast.error("Color is required")
+      return
+    }
+
+    if (formData.qty === undefined || formData.qty === null || formData.qty === "") {
+      toast.error("Quantity is required")
+      return
+    }
+
+    if (!formData.coo || !formData.coo.trim()) {
+      toast.error("COO is required")
+      return
+    }
+
+    if (!formData.sample_type || !formData.sample_type.trim()) {
+      toast.error("Sample type is required")
+      return
+    }
+
+    if (!formData.season_id || !formData.brand_id) {
+      toast.error("Season and Brand are required")
       return
     }
 
     setLoading(true)
     try {
       const payload: CreateSampleInput = {
-        ...formData,
-        style_number: formData.style_number.trim(),
-        style_name: formData.style_name?.trim() || undefined,
-        color: formData.color?.trim() || undefined,
-        qty: formData.qty || undefined,
-        coo: formData.coo?.trim() || undefined,
-        current_status: formData.current_status?.trim() || "Pending",
-        current_stage: formData.current_stage?.trim() || STAGES.PRODUCT_BUSINESS_DEV,
+        style: {
+          style_number: formData.style_number.trim(),
+          style_name: formData.style_name?.trim() || "",
+          color: formData.color?.trim() || "",
+          qty: formData.qty,
+          season_id: Number(formData.season_id),
+          brand_id: Number(formData.brand_id),
+          division: formData.division,
+          product_category: formData.product_category,
+          coo: formData.coo,
+        },
+        unfree_status: formData.unfree_status,
+        sample_type: formData.sample_type,
+        sample_type_group: formData.sample_type_group,
+        sample_status: formData.sample_status,
+        kickoff_date: formData.kickoff_date || null,
+        sample_due_denver: formData.sample_due_denver || null,
+        requested_lead_time: formData.requested_lead_time != null ? formData.requested_lead_time : null,
+        lead_time_type: formData.lead_time_type || "Weeks",
+        
+        ref_from_m88: formData.ref_from_m88,
+        ref_sample_to_fty: formData.ref_sample_to_fty,
+        additional_notes: formData.additional_notes,
+        current_status: formData.current_status || "Pending",
+        current_stage: formData.current_stage || STAGES.SAMPLE_DEVELOPMENT,
         created_by: user.id,
       }
+      // Ensure client computes requested_lead_time from dates as weeks
+      function computeLeadTime(kickoff: string | undefined, due: string | undefined) {
+        if (!kickoff || !due) return undefined
+        const kd = Date.parse(kickoff)
+        const dd = Date.parse(due)
+        if (!Number.isFinite(kd) || !Number.isFinite(dd)) return undefined
+        const days = Math.ceil((dd - kd) / (1000 * 60 * 60 * 24))
+        const weeks = Math.ceil(days / 7)
+        return weeks > 0 ? weeks : 0
+      }
+      function classifyLeadTime(weeks: number | undefined | null) {
+        if (weeks == null) return null
+        if (weeks === 0) return null
+        if (weeks > 17) return 'STND'
+        if (weeks >= 1 && weeks <= 17) return 'RUSH'
+        return null
+      }
+
+      if ((payload.requested_lead_time == null || payload.requested_lead_time === undefined) && payload.kickoff_date && payload.sample_due_denver) {
+        const computed = computeLeadTime(payload.kickoff_date, payload.sample_due_denver)
+        if (computed !== undefined) {
+          payload.requested_lead_time = computed
+          payload.lead_time_type = classifyLeadTime(computed)
+        }
+      } else if (payload.requested_lead_time != null) {
+        payload.lead_time_type = classifyLeadTime(Number(payload.requested_lead_time))
+      }
+
       const sample = await createSample(payload)
       toast.success("Sample created successfully")
       navigate(`/samples/${sample.id}`)
@@ -144,6 +220,16 @@ export default function SampleCreatePage() {
       let success = 0
       let failed = 0
 
+      function computeLeadTime(kickoff: string | undefined, due: string | undefined) {
+        if (!kickoff || !due) return undefined
+        const kd = Date.parse(kickoff)
+        const dd = Date.parse(due)
+        if (!Number.isFinite(kd) || !Number.isFinite(dd)) return undefined
+        const days = Math.ceil((dd - kd) / (1000 * 60 * 60 * 24))
+        const weeks = Math.ceil(days / 7)
+        return weeks > 0 ? weeks : 0
+      }
+
       for (const row of rows) {
         const style_number = row.style_number || row.styleNumber
         if (!style_number) {
@@ -151,32 +237,29 @@ export default function SampleCreatePage() {
           continue
         }
 
-        const season_id = Number(row.season_id || row.seasonId || 0)
-        const brand_id = Number(row.brand_id || row.brandId || 0)
-        const division_id = Number(row.division_id || row.divisionId || 0)
-        const category_id = Number(row.category_id || row.categoryId || 0)
-        const sample_type_id = Number(row.sample_type_id || row.sampleTypeId || 0)
-
-        if (!season_id || !brand_id || !division_id || !category_id || !sample_type_id) {
-          failed++
-          continue
-        }
-
         const payload: CreateSampleInput = {
-          style_number: style_number.trim(),
-          style_name: row.style_name || row.styleName || undefined,
-          color: row.color || undefined,
-          qty: row.qty ? Number(row.qty) : undefined,
-          season_id,
-          brand_id,
-          division_id,
-          category_id,
-          sample_type_id,
-          coo: row.coo || undefined,
+          style: {
+            brand_id: Number(row.brand_id || row.brandId || 0),
+            season_id: Number(row.season_id || row.seasonId || 0),
+            style_number: style_number.trim(),
+            style_name: row.style_name || row.styleName || "",
+            division: row.division || "",
+            product_category: row.product_category || row.productCategory || "",
+            color: row.color || "",
+            qty: row.qty ? Number(row.qty) : undefined,
+            coo: row.coo || "",
+          },
+          unfree_status: row.unfree_status || "",
+          sample_type: row.sample_type || row.sampleType || "",
+          sample_status: row.sample_status || row.sampleStatus || "Active",
+          kickoff_date: row.kickoff_date || "",
+          sample_due_denver: row.sample_due_denver || "",
           current_status: (row.current_status || row.currentStatus || "Pending").trim() || "Pending",
           current_stage:
-            (row.current_stage || row.currentStage || STAGES.PRODUCT_BUSINESS_DEV).trim() ||
-            STAGES.PRODUCT_BUSINESS_DEV,
+            (row.current_stage || row.currentStage || STAGES.SAMPLE_DEVELOPMENT).trim() ||
+            STAGES.SAMPLE_DEVELOPMENT,
+          requested_lead_time: (row.requested_lead_time ? Number(row.requested_lead_time) : undefined) ?? computeLeadTime(row.kickoff_date || row.kickoffDate, row.sample_due_denver || row.sampleDueDenver),
+          lead_time_type: classifyLeadTime((row.requested_lead_time ? Number(row.requested_lead_time) : undefined) ?? computeLeadTime(row.kickoff_date || row.kickoffDate, row.sample_due_denver || row.sampleDueDenver)),
           created_by: user.id,
         }
 
@@ -247,7 +330,7 @@ export default function SampleCreatePage() {
             <CardDescription>Enter the sample details</CardDescription>
           </CardHeader>
           <CardContent className="space-y-6">
-            <div className="grid gap-6 md:grid-cols-2">
+            <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
               <div className="space-y-2">
                 <Label htmlFor="style_number">
                   Style Number <span className="text-destructive">*</span>
@@ -266,6 +349,7 @@ export default function SampleCreatePage() {
                   id="style_name"
                   value={formData.style_name}
                   onChange={(e) => setFormData({ ...formData, style_name: e.target.value })}
+                  required
                 />
               </div>
 
@@ -275,6 +359,7 @@ export default function SampleCreatePage() {
                   id="color"
                   value={formData.color}
                   onChange={(e) => setFormData({ ...formData, color: e.target.value })}
+                  required
                 />
               </div>
 
@@ -287,6 +372,7 @@ export default function SampleCreatePage() {
                   onChange={(e) =>
                     setFormData({ ...formData, qty: e.target.value ? Number(e.target.value) : undefined })
                   }
+                  required
                 />
               </div>
 
@@ -296,6 +382,7 @@ export default function SampleCreatePage() {
                   id="coo"
                   value={formData.coo}
                   onChange={(e) => setFormData({ ...formData, coo: e.target.value })}
+                  required
                 />
               </div>
 
@@ -318,7 +405,7 @@ export default function SampleCreatePage() {
                       <SelectContent>
                         {lookups.seasons.map((season) => (
                           <SelectItem key={season.id} value={season.id.toString()}>
-                            {season.name} {season.year}
+                            {season.code} {season.year}
                           </SelectItem>
                         ))}
                       </SelectContent>
@@ -350,22 +437,17 @@ export default function SampleCreatePage() {
                   </div>
 
                   <div className="space-y-2">
-                    <Label htmlFor="division_id">
-                      Division <span className="text-destructive">*</span>
-                    </Label>
+                    <Label htmlFor="division">Division</Label>
                     <Select
-                      value={formData.division_id ? formData.division_id.toString() : undefined}
-                      onValueChange={(value) =>
-                        setFormData({ ...formData, division_id: Number(value) })
-                      }
-                      required
+                      value={formData.division}
+                      onValueChange={(value) => setFormData({ ...formData, division: value })}
                     >
-                      <SelectTrigger id="division_id">
+                      <SelectTrigger id="division">
                         <SelectValue placeholder="Select division" />
                       </SelectTrigger>
                       <SelectContent>
                         {lookups.divisions.map((division) => (
-                          <SelectItem key={division.id} value={division.id.toString()}>
+                          <SelectItem key={division.id} value={division.name}>
                             {division.name}
                           </SelectItem>
                         ))}
@@ -374,22 +456,17 @@ export default function SampleCreatePage() {
                   </div>
 
                   <div className="space-y-2">
-                    <Label htmlFor="category_id">
-                      Category <span className="text-destructive">*</span>
-                    </Label>
+                    <Label htmlFor="product_category">Category</Label>
                     <Select
-                      value={formData.category_id ? formData.category_id.toString() : undefined}
-                      onValueChange={(value) =>
-                        setFormData({ ...formData, category_id: Number(value) })
-                      }
-                      required
+                      value={formData.product_category}
+                      onValueChange={(value) => setFormData({ ...formData, product_category: value })}
                     >
-                      <SelectTrigger id="category_id">
+                      <SelectTrigger id="product_category">
                         <SelectValue placeholder="Select category" />
                       </SelectTrigger>
                       <SelectContent>
                         {lookups.product_categories.map((category) => (
-                          <SelectItem key={category.id} value={category.id.toString()}>
+                          <SelectItem key={category.id} value={category.name}>
                             {category.name}
                           </SelectItem>
                         ))}
@@ -398,22 +475,18 @@ export default function SampleCreatePage() {
                   </div>
 
                   <div className="space-y-2">
-                    <Label htmlFor="sample_type_id">
-                      Sample Type <span className="text-destructive">*</span>
-                    </Label>
+                    <Label htmlFor="sample_type">Sample Type</Label>
                     <Select
-                      value={formData.sample_type_id ? formData.sample_type_id.toString() : undefined}
-                      onValueChange={(value) =>
-                        setFormData({ ...formData, sample_type_id: Number(value) })
-                      }
-                      required
+                      value={formData.sample_type}
+                        onValueChange={(value) => setFormData({ ...formData, sample_type: value })}
+                        required
                     >
-                      <SelectTrigger id="sample_type_id">
-                        <SelectValue placeholder="Select sample type" />
+                      <SelectTrigger id="sample_type">
+                        <SelectValue placeholder="Select type" />
                       </SelectTrigger>
                       <SelectContent>
                         {lookups.sample_types.map((type) => (
-                          <SelectItem key={type.id} value={type.id.toString()}>
+                          <SelectItem key={type.id} value={type.name}>
                             {type.name}
                           </SelectItem>
                         ))}
@@ -422,29 +495,81 @@ export default function SampleCreatePage() {
                   </div>
                 </>
               )}
+            </div>
 
-              <div className="space-y-1.5">
-                <Label htmlFor="current_status" className="text-xs">Current Status</Label>
-                <Input
-                  id="current_status"
-                  value={formData.current_status}
-                  readOnly
-                  disabled
-                  className="h-8 text-sm bg-muted cursor-not-allowed"
-                />
-              </div>
-
-              <div className="space-y-1.5">
-                <Label htmlFor="current_stage" className="text-xs">Current Stage</Label>
-                <Input
-                  id="current_stage"
-                  value={formData.current_stage}
-                  readOnly
-                  disabled
-                  className="h-8 text-sm bg-muted cursor-not-allowed"
-                />
+            <div className="border-t pt-6">
+              <h3 className="text-sm font-semibold mb-4">PBD Header Details</h3>
+              <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+                <div className="space-y-2">
+                  <Label htmlFor="unfree_status">Unfree Status</Label>
+                  <Select
+                    value={formData.unfree_status}
+                    onValueChange={(v) => setFormData({ ...formData, unfree_status: v })}
+                  >
+                    <SelectTrigger id="unfree_status">
+                      <SelectValue placeholder="Select" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="FREE">FREE</SelectItem>
+                      <SelectItem value="UNFREE">UNFREE</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="sample_status">Sample Status</Label>
+                  <Select
+                    value={formData.sample_status}
+                    onValueChange={(v) => setFormData({ ...formData, sample_status: v })}
+                    required
+                  >
+                    <SelectTrigger id="sample_status">
+                      <SelectValue placeholder="Select status" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="Active">Active</SelectItem>
+                      <SelectItem value="Inactive">Inactive</SelectItem>
+                      <SelectItem value="Dropped">Dropped</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="kickoff_date">Kickoff Date</Label>
+                  <Input
+                    id="kickoff_date"
+                    type="date"
+                    value={formData.kickoff_date}
+                    onChange={(e) => setFormData({ ...formData, kickoff_date: e.target.value })}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="sample_due_denver">Sample Due (Denver)</Label>
+                  <Input
+                    id="sample_due_denver"
+                    type="date"
+                    value={formData.sample_due_denver}
+                    onChange={(e) => setFormData({ ...formData, sample_due_denver: e.target.value })}
+                  />
+                </div>
+                {/* Requested Lead Time removed from create form */}
+                <div className="space-y-2">
+                  <Label htmlFor="ref_from_m88">Ref from M88?</Label>
+                  <Select
+                    value={formData.ref_from_m88}
+                    onValueChange={(v) => setFormData({ ...formData, ref_from_m88: v })}
+                  >
+                    <SelectTrigger id="ref_from_m88">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="Yes">Yes</SelectItem>
+                      <SelectItem value="No">No</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
             </div>
+
+            {/* Initial State is handled by backend/PBD; not shown on create form */}
 
             <div className="flex justify-end gap-2">
               <Button

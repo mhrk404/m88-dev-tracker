@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from "react"
-import { Plus, Pencil, Trash2, Calendar as CalendarIcon } from "lucide-react"
-import { format, parseISO } from "date-fns"
+import { Plus, Pencil, Trash2 } from "lucide-react"
 import PageBreadcrumbs from "@/components/layout/PageBreadcrumbs"
 import { Loading } from "@/components/ui/loading"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -23,8 +22,6 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { Label } from "@/components/ui/label"
-import { Calendar } from "@/components/ui/calendar"
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import RoleGate from "@/components/protected/RoleGate"
 import { ROLES } from "@/lib/constants"
 import { toast } from "sonner"
@@ -85,9 +82,6 @@ export default function LookupsPage() {
   const [startDate, setStartDate] = useState<string>("")
   const [endDate, setEndDate] = useState<string>("")
 
-  const startDateObj = useMemo(() => (startDate ? parseISO(startDate) : undefined), [startDate])
-  const endDateObj = useMemo(() => (endDate ? parseISO(endDate) : undefined), [endDate])
-
   async function refresh() {
     setLoading(true)
     try {
@@ -130,7 +124,7 @@ export default function LookupsPage() {
           ? seasons
           : seasons.filter(
               (s) =>
-                s.name.toLowerCase().includes(q) ||
+                (s.code ?? "").toLowerCase().includes(q) ||
                 String(s.year).includes(q)
             )
       case "divisions":
@@ -171,10 +165,10 @@ export default function LookupsPage() {
 
   function openEdit(row: any) {
     setEditingId(row.id)
-    setName(row.name ?? "")
+    setName(kind === "seasons" ? "" : row.name ?? "")
     setYear(kind === "seasons" ? row.year ?? "" : "")
     setGroup(kind === "sample_types" ? row.group ?? "" : "")
-    setCode(kind === "roles" ? row.code ?? "" : "")
+    setCode(kind === "roles" ? row.code ?? "" : kind === "seasons" ? row.code ?? "" : "")
     setStartDate(
       kind === "seasons" && row.start_date
         ? String(row.start_date).slice(0, 10)
@@ -189,9 +183,16 @@ export default function LookupsPage() {
   }
 
   async function handleSave() {
-    if (!name.trim()) {
-      toast.error("Name is required")
-      return
+    if (kind === "seasons") {
+      if (!code.trim()) {
+        toast.error("Code is required")
+        return
+      }
+    } else {
+      if (!name.trim()) {
+        toast.error("Name is required")
+        return
+      }
     }
 
     setSaving(true)
@@ -209,7 +210,7 @@ export default function LookupsPage() {
           return
         }
         const payload = {
-          name: name.trim(),
+          code: code.trim(),
           year: Number(year),
           start_date: startDate || undefined,
           end_date: endDate || undefined,
@@ -302,7 +303,7 @@ export default function LookupsPage() {
 
   return (
     <RoleGate
-      allowedRoles={[ROLES.SUPER_ADMIN, ROLES.ADMIN]}
+      allowedRoles={[ROLES.ADMIN]}
       fallback={
         <div className="p-6">
           <div className="text-sm text-muted-foreground">You don’t have access to manage lookups.</div>
@@ -388,7 +389,7 @@ export default function LookupsPage() {
                   {items.map((row: any) => (
                     <TableRow key={row.id}>
                       <TableCell className="text-xs text-muted-foreground">{row.id}</TableCell>
-                      <TableCell>{row.name}</TableCell>
+                      <TableCell>{kind === 'seasons' ? row.code : row.name}</TableCell>
                       {kind === "seasons" && (
                         <>
                           <TableCell>{row.year}</TableCell>
@@ -438,7 +439,7 @@ export default function LookupsPage() {
               </DialogTitle>
               <DialogDescription>
                 {kind === "seasons"
-                  ? "Set the season name and year."
+                  ? "Set the season code and year."
                   : kind === "sample_types"
                   ? "Set sample type name and optional group."
                   : kind === "roles"
@@ -461,17 +462,31 @@ export default function LookupsPage() {
                 </div>
               )}
 
-              <div className="space-y-1.5">
-                <Label htmlFor="name" className="text-xs">
-                  Name
-                </Label>
-                <Input
-                  id="name"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  className="h-8 text-sm"
-                />
-              </div>
+              {kind === "seasons" ? (
+                <div className="space-y-1.5">
+                  <Label htmlFor="code" className="text-xs">
+                    Code
+                  </Label>
+                  <Input
+                    id="code"
+                    value={code}
+                    onChange={(e) => setCode(e.target.value)}
+                    className="h-8 text-sm uppercase"
+                  />
+                </div>
+              ) : (
+                <div className="space-y-1.5">
+                  <Label htmlFor="name" className="text-xs">
+                    Name
+                  </Label>
+                  <Input
+                    id="name"
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    className="h-8 text-sm"
+                  />
+                </div>
+              )}
 
               {kind === "seasons" && (
                 <div className="space-y-1.5">
@@ -496,55 +511,25 @@ export default function LookupsPage() {
                     <Label htmlFor="start_date" className="text-xs">
                       Start date (optional)
                     </Label>
-                    <Popover>
-                      <PopoverTrigger asChild>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          className="h-8 w-full justify-between px-3 text-sm font-normal"
-                        >
-                          <span className={startDateObj ? "" : "text-muted-foreground"}>
-                            {startDateObj ? format(startDateObj, "MMM d, yyyy") : "Pick a date"}
-                          </span>
-                          <CalendarIcon className="h-4 w-4 text-muted-foreground" />
-                        </Button>
-                      </PopoverTrigger>
-                      <PopoverContent className="w-auto p-0" align="start">
-                        <Calendar
-                          mode="single"
-                          selected={startDateObj}
-                          onSelect={(d) => setStartDate(d ? format(d, "yyyy-MM-dd") : "")}
-                          initialFocus
-                        />
-                      </PopoverContent>
-                    </Popover>
+                    <Input
+                      id="start_date"
+                      type="date"
+                      value={startDate}
+                      onChange={(e) => setStartDate(e.target.value)}
+                      className="h-8 text-sm"
+                    />
                   </div>
                   <div className="space-y-1.5">
                     <Label htmlFor="end_date" className="text-xs">
                       End date (optional)
                     </Label>
-                    <Popover>
-                      <PopoverTrigger asChild>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          className="h-8 w-full justify-between px-3 text-sm font-normal"
-                        >
-                          <span className={endDateObj ? "" : "text-muted-foreground"}>
-                            {endDateObj ? format(endDateObj, "MMM d, yyyy") : "Pick a date"}
-                          </span>
-                          <CalendarIcon className="h-4 w-4 text-muted-foreground" />
-                        </Button>
-                      </PopoverTrigger>
-                      <PopoverContent className="w-auto p-0" align="start">
-                        <Calendar
-                          mode="single"
-                          selected={endDateObj}
-                          onSelect={(d) => setEndDate(d ? format(d, "yyyy-MM-dd") : "")}
-                          initialFocus
-                        />
-                      </PopoverContent>
-                    </Popover>
+                    <Input
+                      id="end_date"
+                      type="date"
+                      value={endDate}
+                      onChange={(e) => setEndDate(e.target.value)}
+                      className="h-8 text-sm"
+                    />
                   </div>
                 </div>
               )}

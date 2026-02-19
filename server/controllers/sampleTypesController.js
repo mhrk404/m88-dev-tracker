@@ -28,19 +28,20 @@ export const getOne = async (req, res) => {
 
 export const create = async (req, res) => {
   try {
-    const { name, group, is_active = true } = req.body;
+    const { name, group = null, description, is_active = true } = req.body;
     if (!name?.trim()) return res.status(400).json({ error: 'name is required' });
-    const { data, error } = await supabase
-      .from('sample_types')
-      .insert({ name: name.trim(), group: group?.trim() || null, is_active: !!is_active })
-      .select('*')
-      .single();
+    const { data, error } = await supabase.from('sample_types').insert({
+      name: name.trim(),
+      group: group?.trim() || null,
+      description: description?.trim() || null,
+      is_active: !!is_active,
+    }).select('*').single();
     if (error) {
       if (error.code === '23505') return res.status(409).json({ error: 'Sample type with this name already exists' });
       throw error;
     }
     const { ip, userAgent } = auditMeta(req);
-    await logAudit({ userId: req.user?.id, action: 'create', resource: 'sample_type', resourceId: String(data?.id), ip, userAgent });
+    await logAudit({ userId: req.user?.id, action: 'create', resource: 'sample_type', resourceId: String(data?.id), details: { name: data?.name }, ip, userAgent });
     return res.status(201).json(data);
   } catch (err) {
     console.error('sample_types create:', err);
@@ -52,10 +53,11 @@ export const update = async (req, res) => {
   try {
     const id = Number(req.params.id);
     if (Number.isNaN(id)) return res.status(400).json({ error: 'Invalid id' });
-    const { name, group, is_active } = req.body;
+    const { name, group, description, is_active } = req.body;
     const updates = {};
     if (name !== undefined) updates.name = name.trim();
-    if (group !== undefined) updates.group = group?.trim() || null;
+    if (group !== undefined) updates.group = group.trim();
+    if (description !== undefined) updates.description = description.trim();
     if (is_active !== undefined) updates.is_active = !!is_active;
     if (Object.keys(updates).length === 0) return res.status(400).json({ error: 'No fields to update' });
     const { data, error } = await supabase.from('sample_types').update(updates).eq('id', id).select('*').maybeSingle();
@@ -64,6 +66,8 @@ export const update = async (req, res) => {
       throw error;
     }
     if (!data) return res.status(404).json({ error: 'Sample type not found' });
+    const { ip, userAgent } = auditMeta(req);
+    await logAudit({ userId: req.user?.id, action: 'update', resource: 'sample_type', resourceId: String(id), ip, userAgent });
     return res.json(data);
   } catch (err) {
     console.error('sample_types update:', err);

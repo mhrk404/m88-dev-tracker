@@ -4,10 +4,9 @@ import { STAGE_TABLES, getStagesForRole } from '../middleware/rbac.js';
 
 /** Ensure sample exists; return 404 if not. Stages are always scoped to a sample. */
 async function ensureSampleExists(sampleId) {
-  const { data, error } = await supabase.from('samples').select('id').eq('id', sampleId).maybeSingle();
+  const { data, error } = await supabase.from('sample_request').select('sample_id').eq('sample_id', sampleId).maybeSingle();
   if (error) throw error;
-  if (!data) return false;
-  return true;
+  return !!data;
 }
 
 export const getStages = async (req, res) => {
@@ -16,8 +15,10 @@ export const getStages = async (req, res) => {
     if (!sampleId) return res.status(400).json({ error: 'sampleId is required' });
     const sampleExists = await ensureSampleExists(sampleId);
     if (!sampleExists) return res.status(404).json({ error: 'Sample not found' });
+
     const allowedStages = getStagesForRole(req.user?.roleCode);
     const tablesToFetch = allowedStages ?? STAGE_TABLES;
+
     const results = {};
     for (const table of STAGE_TABLES) {
       if (!tablesToFetch.includes(table)) {
@@ -41,40 +42,49 @@ export const updateStage = async (req, res) => {
     if (!sampleId) return res.status(400).json({ error: 'sampleId is required' });
     const sampleExists = await ensureSampleExists(sampleId);
     if (!sampleExists) return res.status(404).json({ error: 'Sample not found' });
+
     const { stage, sample_id: _bodySampleId, ...payload } = req.body;
     if (!stage || !STAGE_TABLES.includes(stage)) {
       return res.status(400).json({ error: 'body.stage is required and must be one of: ' + STAGE_TABLES.join(', ') });
     }
+
     const allowedStages = getStagesForRole(req.user?.roleCode);
     if (allowedStages != null && !allowedStages.includes(stage)) {
       return res.status(403).json({ error: 'You can only update your own stage: ' + (allowedStages.join(' or ')) });
     }
-    const table = stage;
-    const modifierEntry = { user_id: req.user.id, modified_at: new Date().toISOString() };
-    delete payload.modified_by_log;
 
-    const { data: existing } = await supabase.from(table).select('id, modified_by_log').eq('sample_id', sampleId).maybeSingle();
+    const table = stage;
+    const { data: existing } = await supabase
+      .from(table)
+      .select('sample_id')
+      .eq('sample_id', sampleId)
+      .maybeSingle();
+
     let data;
     if (existing) {
-      const existingLog = Array.isArray(existing.modified_by_log) ? existing.modified_by_log : [];
-      const modifiedByLog = [...existingLog, modifierEntry];
-      const { data: updated, error } = await supabase
-        .from(table)
-        .update({ ...payload, modified_by_log: modifiedByLog })
-        .eq('sample_id', sampleId)
-        .select('*')
-        .single();
+      const { data: updated, error } = await supabase.from(table).update(payload).eq('sample_id', sampleId).select('*').single();
       if (error) throw error;
       data = updated;
     } else {
-      const { data: inserted, error } = await supabase
-        .from(table)
-        .insert({ sample_id: sampleId, ...payload, modified_by_log: [modifierEntry] })
-        .select('*')
-        .single();
+      const { data: inserted, error } = await supabase.from(table).insert({ sample_id: sampleId, ...payload }).select('*').single();
       if (error) throw error;
       data = inserted;
     }
+
+    try {
+      await supabase.from('stage_audit_log').insert({
+        sample_id: sampleId,
+        user_id: req.user.id,
+        stage: table,
+        action: existing ? 'UPDATE' : 'CREATE',
+        field_changed: null,
+        old_value: null,
+        new_value: null,
+      });
+    } catch (e) {
+      console.error('stage_audit_log insert failed:', e);
+    }
+
     const { ip, userAgent } = auditMeta(req);
     await logAudit({ userId: req.user?.id, action: 'update', resource: 'stage', resourceId: sampleId, details: { stage: table }, ip, userAgent });
     return res.json(data);

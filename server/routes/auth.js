@@ -5,7 +5,7 @@ import { requireAdmin } from '../middleware/rbac.js';
 
 const router = express.Router();
 
-router.post('/register', authenticate, requireAdmin, authController.register);
+router.post('/register', authController.register);
 router.post('/login', authController.login);
 router.post('/logout', optionalAuth, authController.logout);
 router.get('/me', authenticate, authController.me);

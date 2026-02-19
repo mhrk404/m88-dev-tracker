@@ -20,6 +20,7 @@ export interface CreateUserInput {
   department?: string
   role_id?: number | null
   is_active?: boolean
+  password?: string
 }
 
 export interface UpdateUserInput {

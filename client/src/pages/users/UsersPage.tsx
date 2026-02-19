@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react"
 import { useSearchParams } from "react-router-dom"
-import { Pencil, Trash2 } from "lucide-react"
+import { Pencil, Trash2, X, Copy, Check } from "lucide-react"
 import { toast } from "sonner"
 import { cn } from "@/lib/utils"
 
@@ -10,6 +10,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Button } from "@/components/ui/button"
+import { Checkbox } from "@/components/ui/checkbox"
 import {
   Dialog,
   DialogContent,
@@ -91,10 +92,32 @@ export default function UsersPage() {
   const [createOpen, setCreateOpen] = useState(false)
   const [editOpen, setEditOpen] = useState(false)
   const [deleteOpen, setDeleteOpen] = useState(false)
+  const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false)
   const [userToDelete, setUserToDelete] = useState<User | null>(null)
   const [createForm, setCreateForm] = useState<CreateUserInput>(emptyCreate())
   const [editUser, setEditUser] = useState<User | null>(null)
   const [editForm, setEditForm] = useState<UpdateUserInput>({})
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
+  const [generatedPassword, setGeneratedPassword] = useState<string>("")
+  const [copiedPassword, setCopiedPassword] = useState(false)
+
+  function generatePassword(username: string): string {
+    if (!username.trim()) return ""
+    const randomNum = Math.floor(Math.random() * 1000)
+    return `${username}M@dison_88${randomNum}`
+  }
+
+  useEffect(() => {
+    const newPassword = generatePassword(createForm.username)
+    setGeneratedPassword(newPassword)
+  }, [createForm.username])
+
+  function copyPasswordToClipboard() {
+    navigator.clipboard.writeText(generatedPassword)
+    setCopiedPassword(true)
+    toast.success("Password copied to clipboard")
+    setTimeout(() => setCopiedPassword(false), 2000)
+  }
 
   async function refresh() {
     setLoading(true)
@@ -191,6 +214,7 @@ export default function UsersPage() {
         full_name: createForm.full_name?.trim() || undefined,
         role_id: createForm.role_id ?? null,
         is_active: createForm.is_active ?? true,
+        password: generatedPassword,
       })
       toast.success("User created")
       setCreateOpen(false)
@@ -235,6 +259,10 @@ export default function UsersPage() {
   }
 
   function openDelete(u: User) {
+    if (u.roleCode === ROLES.ADMIN) {
+      toast.error("Cannot delete administrative users")
+      return
+    }
     setUserToDelete(u)
     setDeleteOpen(true)
   }
@@ -246,6 +274,11 @@ export default function UsersPage() {
       toast.success("User deleted")
       setDeleteOpen(false)
       setUserToDelete(null)
+      setSelectedIds((prev) => {
+        const next = new Set(prev)
+        next.delete(userToDelete.id)
+        return next
+      })
       await refresh()
     } catch (err: any) {
       console.error("Delete user failed:", err)
@@ -253,11 +286,63 @@ export default function UsersPage() {
     }
   }
 
+  async function onBulkDelete() {
+    if (selectedIds.size === 0) return
+    try {
+      const usersToDelete = Array.from(selectedIds).filter((id) => {
+        const user = users.find((u) => u.id === id)
+        return user && user.roleCode !== ROLES.ADMIN
+      })
+
+      if (usersToDelete.length === 0) {
+        toast.error("Cannot delete administrative users")
+        return
+      }
+
+      const skippedCount = selectedIds.size - usersToDelete.length
+
+      await Promise.all(usersToDelete.map((id) => deleteUser(id)))
+
+      let message = `${usersToDelete.length} user(s) deleted`
+      if (skippedCount > 0) {
+        message += ` (${skippedCount} administrative user(s) cannot be deleted)`
+      }
+
+      toast.success(message)
+      setBulkDeleteOpen(false)
+      setSelectedIds(new Set())
+      await refresh()
+    } catch (err: any) {
+      console.error("Bulk delete failed:", err)
+      toast.error(err?.response?.data?.error || "Failed to delete users")
+    }
+  }
+
+  const toggleSelectUser = (id: number) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) {
+        next.delete(id)
+      } else {
+        next.add(id)
+      }
+      return next
+    })
+  }
+
+  const toggleSelectAll = () => {
+    if (selectedIds.size === pagedUsers.length) {
+      setSelectedIds(new Set())
+    } else {
+      setSelectedIds(new Set(pagedUsers.map((u) => u.id)))
+    }
+  }
+
   if (loading) return <Loading fullScreen text="Loading users..." />
 
   return (
     <RoleGate
-      allowedRoles={[ROLES.SUPER_ADMIN, ROLES.ADMIN]}
+      allowedRoles={[ROLES.ADMIN]}
       fallback={
         <div className="p-6">
           <div className="text-sm text-muted-foreground">You don’t have access to manage users.</div>
@@ -318,6 +403,31 @@ export default function UsersPage() {
             </CardDescription>
           </CardHeader>
           <CardContent>
+            {selectedIds.size > 0 && (
+              <div className="mb-4 flex items-center justify-between rounded-lg border border-blue-200 bg-blue-50/50 px-4 py-3 dark:border-blue-900/30 dark:bg-blue-950/30">
+                <div className="text-sm font-medium text-blue-900 dark:text-blue-200">
+                  {selectedIds.size} user{selectedIds.size !== 1 ? "s" : ""} selected
+                </div>
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setBulkDeleteOpen(true)}
+                    className="border-destructive/50 text-destructive hover:bg-destructive/10"
+                  >
+                    <Trash2 className="h-4 w-4 mr-2" />
+                    Delete Selected
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon-xs"
+                    onClick={() => setSelectedIds(new Set())}
+                  >
+                    <X className="h-4 w-4" />
+                  </Button>
+                </div>
+              </div>
+            )}
             {filteredUsers.length === 0 ? (
               <div className="py-8 text-center text-muted-foreground">No users found</div>
             ) : (
@@ -325,6 +435,12 @@ export default function UsersPage() {
                 <Table>
                   <TableHeader>
                     <TableRow>
+                      <TableHead className="w-12">
+                        <Checkbox
+                          checked={selectedIds.size > 0 && selectedIds.size === pagedUsers.length}
+                          onCheckedChange={toggleSelectAll}
+                        />
+                      </TableHead>
                       <TableHead>Username</TableHead>
                       <TableHead>Email</TableHead>
                       <TableHead>Name</TableHead>
@@ -336,15 +452,24 @@ export default function UsersPage() {
                   <TableBody>
                     {pagedUsers.map((u) => {
                     const isCurrentUser = currentUser?.id === u.id
+                    const isSelected = selectedIds.has(u.id)
                     return (
                       <TableRow
                         key={u.id}
                         className={cn(
-                          "cursor-pointer transition-colors hover:bg-muted/70",
+                          "transition-colors",
+                          isSelected && "bg-blue-50/50 dark:bg-blue-950/30",
+                          !isSelected && "cursor-pointer hover:bg-muted/70",
                           isCurrentUser && "bg-muted/50"
                         )}
-                        onClick={() => openEdit(u)}
+                        onClick={() => !isSelected && openEdit(u)}
                       >
+                        <TableCell onClick={(e) => e.stopPropagation()}>
+                          <Checkbox
+                            checked={isSelected}
+                            onCheckedChange={() => toggleSelectUser(u.id)}
+                          />
+                        </TableCell>
                         <TableCell className="font-medium">
                           <div className="flex items-center gap-2">
                             {u.username}
@@ -374,7 +499,12 @@ export default function UsersPage() {
                             <Button variant="ghost" size="icon-xs" onClick={() => openEdit(u)}>
                               <Pencil className="h-4 w-4" />
                             </Button>
-                            <Button variant="ghost" size="icon-xs" onClick={() => openDelete(u)}>
+                            <Button
+                              variant="ghost"
+                              size="icon-xs"
+                              onClick={() => openDelete(u)}
+                              disabled={u.roleCode === ROLES.ADMIN}
+                            >
                               <Trash2 className="h-4 w-4 text-destructive" />
                             </Button>
                           </div>
@@ -436,7 +566,17 @@ export default function UsersPage() {
           </CardContent>
         </Card>
 
-        <Dialog open={createOpen} onOpenChange={setCreateOpen}>
+        <Dialog
+          open={createOpen}
+          onOpenChange={(open) => {
+            setCreateOpen(open)
+            if (!open) {
+              setCreateForm(emptyCreate())
+              setGeneratedPassword("")
+              setCopiedPassword(false)
+            }
+          }}
+        >
           <DialogContent className="max-w-2xl">
             <DialogHeader>
               <DialogTitle>Create User</DialogTitle>
@@ -510,6 +650,31 @@ export default function UsersPage() {
                   </SelectContent>
                 </Select>
               </div>
+              <div className="space-y-1.5 md:col-span-2">
+                <Label className="text-xs" htmlFor="c_password">Initial Password</Label>
+                <div className="flex items-center gap-2">
+                  <Input
+                    id="c_password"
+                    className="h-8 text-sm font-mono bg-muted"
+                    value={generatedPassword}
+                    readOnly
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={copyPasswordToClipboard}
+                    className="shrink-0"
+                  >
+                    {copiedPassword ? (
+                      <Check className="h-4 w-4 text-emerald-600" />
+                    ) : (
+                      <Copy className="h-4 w-4" />
+                    )}
+                  </Button>
+                </div>
+                <p className="text-xs text-muted-foreground">Format: username + M@dison_88 + random number</p>
+              </div>
               </div>
             </div>
 
@@ -568,10 +733,6 @@ export default function UsersPage() {
                       onValueChange={(v) =>
                         setEditForm((p) => ({ ...p, role_id: v === "none" ? null : Number(v) }))
                       }
-                      disabled={
-                        currentUser?.roleCode === ROLES.ADMIN &&
-                        editUser?.roleCode === ROLES.SUPER_ADMIN
-                      }
                     >
                       <SelectTrigger id="e_role" className="h-8 text-sm">
                         <SelectValue placeholder="Select role" />
@@ -579,17 +740,7 @@ export default function UsersPage() {
                       <SelectContent>
                         <SelectItem value="none">No role</SelectItem>
                         {lookups?.roles
-                          ?.filter((r) => {
-                            // If admin is editing super admin, hide super admin role option
-                            if (
-                              currentUser?.roleCode === ROLES.ADMIN &&
-                              editUser?.roleCode === ROLES.SUPER_ADMIN
-                            ) {
-                              return r.code !== ROLES.SUPER_ADMIN
-                            }
-                            return true
-                          })
-                          .map((r) => (
+                          ?.map((r) => (
                             <SelectItem key={r.id} value={String(r.id)}>
                               {r.name} ({r.code})
                             </SelectItem>
@@ -597,7 +748,7 @@ export default function UsersPage() {
                       </SelectContent>
                     </Select>
                     {currentUser?.roleCode === ROLES.ADMIN &&
-                      editUser?.roleCode === ROLES.SUPER_ADMIN && (
+                      editUser?.roleCode === ROLES.ADMIN && (
                         <p className="text-xs text-muted-foreground">
                           Admins cannot change the role of super admins.
                         </p>
@@ -662,6 +813,23 @@ export default function UsersPage() {
               <AlertDialogCancel>Cancel</AlertDialogCancel>
               <AlertDialogAction onClick={onDelete}>
                 Delete User
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+
+        <AlertDialog open={bulkDeleteOpen} onOpenChange={setBulkDeleteOpen}>
+          <AlertDialogContent className="max-w-md">
+            <AlertDialogHeader>
+              <AlertDialogTitle>Delete {selectedIds.size} User{selectedIds.size !== 1 ? "s" : ""}?</AlertDialogTitle>
+              <AlertDialogDescription>
+                Are you sure you want to delete {selectedIds.size} user{selectedIds.size !== 1 ? "s" : ""}? This action cannot be undone.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction onClick={onBulkDelete}>
+                Delete {selectedIds.size} User{selectedIds.size !== 1 ? "s" : ""}
               </AlertDialogAction>
             </AlertDialogFooter>
           </AlertDialogContent>

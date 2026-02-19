@@ -28,10 +28,10 @@ export default function DashboardPage() {
     return <Loading fullScreen text="Loading dashboard..." />
   }
 
-  if (!stats) {
+  if (!stats || !stats.submission || !stats.delivery) {
     return (
       <div className="flex items-center justify-center min-h-screen">
-        <div className="text-destructive">Failed to load dashboard data</div>
+        <div className="text-destructive">Dashboard data incomplete or failed to load</div>
       </div>
     )
   }
@@ -42,11 +42,11 @@ export default function DashboardPage() {
     stats.submission.delay +
     stats.submission.pending
 
-  const onTimePercentage = submissionTotal > 0 
-    ? Math.round((stats.submission.on_time / submissionTotal) * 100) 
+  const onTimePercentage = submissionTotal > 0
+    ? Math.round((stats.submission.on_time / submissionTotal) * 100)
     : 0
-  const delayPercentage = submissionTotal > 0 
-    ? Math.round((stats.submission.delay / submissionTotal) * 100) 
+  const delayPercentage = submissionTotal > 0
+    ? Math.round((stats.submission.delay / submissionTotal) * 100)
     : 0
   const onTimeTrend = onTimePercentage >= 70 ? "up" : "down"
   const delayTrend = delayPercentage <= 20 ? "down" : "up"

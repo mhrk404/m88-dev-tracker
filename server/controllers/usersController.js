@@ -1,7 +1,7 @@
 import { supabase } from '../config/supabase.js';
 import { logAudit, auditMeta } from '../services/auditService.js';
 
-const USER_SELECT = 'id, supabase_user_id, username, email, full_name, department, role_id, is_active, created_at, updated_at';
+const USER_SELECT = 'id, username, email, full_name, department, role_id, is_active, created_at, updated_at';
 
 export const list = async (req, res) => {
   try {
@@ -33,10 +33,11 @@ export const getOne = async (req, res) => {
 
 export const create = async (req, res) => {
   try {
-    const { username, email, full_name, department, role_id, is_active = true } = req.body;
+    const { username, email, full_name, department, role_id, is_active = true, password } = req.body;
     if (!username?.trim()) return res.status(400).json({ error: 'username is required' });
     if (!email?.trim()) return res.status(400).json({ error: 'email is required' });
-    const payload = {
+    
+    let payload = {
       username: username.trim(),
       email: email.trim().toLowerCase(),
       full_name: full_name?.trim() || null,
@@ -44,6 +45,13 @@ export const create = async (req, res) => {
       role_id: role_id ?? null,
       is_active: !!is_active,
     };
+    
+    // Hash password if provided
+    if (password) {
+      const bcrypt = (await import('bcryptjs')).default;
+      const SALT_ROUNDS = 12;
+      payload.password_hash = await bcrypt.hash(password, SALT_ROUNDS);
+    }
     const { data, error } = await supabase.from('users').insert(payload).select(USER_SELECT).single();
     if (error) {
       if (error.code === '23505') return res.status(409).json({ error: 'Username or email already exists' });
@@ -107,19 +115,18 @@ export const remove = async (req, res) => {
       return res.status(409).json({ error: 'Cannot delete the only user. Create another user first.' });
     }
 
+    // New schema tables
     const tablesWithNotNullUserFk = [
-      { table: 'samples', column: 'created_by' },
-      { table: 'sample_history', column: 'changed_by' },
-      { table: 'status_transitions', column: 'transitioned_by' },
+      { table: 'sample_request', column: 'created_by' },
     ];
     const tablesWithNullableUserFk = [
-      { table: 'product_business_dev', column: 'owner_id' },
-      { table: 'technical_design', column: 'owner_id' },
-      { table: 'factory_execution', column: 'owner_id' },
-      { table: 'factory_execution', column: 'fty_md2' },
-      { table: 'merchandising_review', column: 'owner_id' },
-      { table: 'costing_analysis', column: 'analyst_id' },
-      { table: 'costing_analysis', column: 'brand_communication_owner_id' },
+      { table: 'team_assignment', column: 'pbd_user_id' },
+      { table: 'team_assignment', column: 'td_user_id' },
+      { table: 'team_assignment', column: 'fty_user_id' },
+      { table: 'team_assignment', column: 'fty_md2_user_id' },
+      { table: 'team_assignment', column: 'md_user_id' },
+      { table: 'team_assignment', column: 'costing_user_id' },
+      { table: 'stage_audit_log', column: 'user_id' },
       { table: 'audit_log', column: 'user_id' },
     ];
 
@@ -133,12 +140,7 @@ export const remove = async (req, res) => {
     }
 
     const { error } = await supabase.from('users').delete().eq('id', id);
-    if (error) {
-      if (error.code === '23503') {
-        return res.status(409).json({ error: 'User is still referenced; reassignment failed or another table references users.' });
-      }
-      throw error;
-    }
+    if (error) throw error;
 
     const { ip, userAgent } = auditMeta(req);
     await logAudit({ userId: req.user?.id, action: 'delete', resource: 'user', resourceId: String(id), ip, userAgent });

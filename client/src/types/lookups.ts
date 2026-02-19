@@ -9,7 +9,7 @@ export interface Brand extends LookupItem {
 }
 
 export interface Season extends LookupItem {
-  name: string
+  code: string
   year: number
   start_date?: string | null
   end_date?: string | null

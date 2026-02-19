@@ -28,9 +28,13 @@ export const getOne = async (req, res) => {
 
 export const create = async (req, res) => {
   try {
-    const { name, is_active = true } = req.body;
+    const { name, contact, is_active = true } = req.body;
     if (!name?.trim()) return res.status(400).json({ error: 'name is required' });
-    const { data, error } = await supabase.from('brands').insert({ name: name.trim(), is_active: !!is_active }).select('*').single();
+    const { data, error } = await supabase.from('brands').insert({
+      name: name.trim(),
+      contact: contact?.trim() || null,
+      is_active: !!is_active
+    }).select('*').single();
     if (error) {
       if (error.code === '23505') return res.status(409).json({ error: 'Brand with this name already exists' });
       throw error;
@@ -48,9 +52,10 @@ export const update = async (req, res) => {
   try {
     const id = Number(req.params.id);
     if (Number.isNaN(id)) return res.status(400).json({ error: 'Invalid id' });
-    const { name, is_active } = req.body;
+    const { name, contact, is_active } = req.body;
     const updates = {};
     if (name !== undefined) updates.name = name.trim();
+    if (contact !== undefined) updates.contact = contact.trim();
     if (is_active !== undefined) updates.is_active = !!is_active;
     if (Object.keys(updates).length === 0) return res.status(400).json({ error: 'No fields to update' });
     const { data, error } = await supabase.from('brands').update(updates).eq('id', id).select('*').maybeSingle();

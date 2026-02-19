@@ -1,26 +1,35 @@
 /**
  * Role-based access control. Use after authenticate().
- * Roles: SUPER_ADMIN, ADMIN, PD, MD, TD, COSTING, FACTORY
- * Stage visibility: PD/MD/TD/COSTING/FACTORY see sample data but only their stage(s); ADMIN and SUPER_ADMIN see all.
+ * Roles: PBD, TD, FTY, MD, COSTING, BRAND, ADMIN.
+ * Stage visibility: role sees sample data; per-role stage write is defined below. ADMIN sees all.
  */
 
+/** Stage tables (sample_request API). */
 export const STAGE_TABLES = [
-  'product_business_dev',
-  'technical_design',
-  'factory_execution',
-  'merchandising_review',
-  'costing_analysis',
+  'psi',
+  'sample_development',
+  'pc_review',
+  'costing',
+  'scf',
+  'shipment_to_brand',
 ];
 
-/** Role → stage table(s) that role can see/edit. ADMIN/SUPER_ADMIN see all; others see only their stage. */
+/** Role → stage tables. null = all stages. */
 const ROLE_STAGES = {
-  SUPER_ADMIN: null,
   ADMIN: null,
-  PD: ['product_business_dev'],
-  MD: ['merchandising_review'],
-  TD: ['technical_design'],
-  COSTING: ['costing_analysis'],
-  FACTORY: ['factory_execution'],
+  BRAND: null,
+  PBD: ['psi', 'costing', 'shipment_to_brand'],
+  TD: ['sample_development', 'pc_review'],
+  FTY: ['sample_development', 'costing', 'scf'],
+  MD: ['pc_review'],
+  COSTING: ['costing'],
+};
+
+/** Compatibility mapping for any remaining legacy role codes. */
+const LEGACY_TO_REVISED = {
+  PD: 'PBD',
+  FACTORY: 'FTY',
+  SUPER_ADMIN: 'ADMIN'
 };
 
 /**
@@ -30,14 +39,15 @@ const ROLE_STAGES = {
  */
 export function getStagesForRole(roleCode) {
   const code = (roleCode || '').toUpperCase();
-  return ROLE_STAGES[code] ?? null;
+  const resolved = LEGACY_TO_REVISED[code] || code;
+  return ROLE_STAGES[resolved] ?? null;
 }
 
-const ADMIN = ['ADMIN', 'SUPER_ADMIN'];
-const SAMPLE_CREATE = ['ADMIN', 'SUPER_ADMIN', 'PD']; 
-const SAMPLE_EDITORS = ['ADMIN', 'SUPER_ADMIN', 'PD', 'MD', 'TD', 'COSTING', 'FACTORY'];
-const ANALYTICS_AND_EXPORT = ['ADMIN', 'SUPER_ADMIN', 'PD', 'MD', 'TD', 'COSTING', 'FACTORY'];
-const ALL_AUTHENTICATED = ['ADMIN', 'SUPER_ADMIN', 'PD', 'MD', 'TD', 'COSTING', 'FACTORY'];
+const ADMIN = ['ADMIN'];
+const SAMPLE_CREATE = ['ADMIN', 'PBD'];
+const SAMPLE_EDITORS = ['ADMIN', 'PBD', 'TD', 'FTY', 'MD', 'COSTING', 'BRAND'];
+const ANALYTICS_AND_EXPORT = ['ADMIN', 'PBD', 'TD', 'FTY', 'MD', 'COSTING', 'BRAND'];
+const ALL_AUTHENTICATED = ['ADMIN', 'PBD', 'TD', 'FTY', 'MD', 'COSTING', 'BRAND'];
 
 function roleMatch(req, roles) {
   const role = (req.user?.roleCode || '').toUpperCase();
@@ -47,11 +57,11 @@ function roleMatch(req, roles) {
 /** Only ADMIN or SUPER_ADMIN */
 export const requireAdmin = (req, res, next) => {
   if (!req.user) return res.status(401).json({ error: 'Authentication required' });
-  if (!roleMatch(req, ADMIN)) return res.status(403).json({ error: 'Admin or Super Admin only' });
+  if (!roleMatch(req, ADMIN)) return res.status(403).json({ error: 'Admin only' });
   next();
 };
 
-/** ADMIN or sample-editor roles (PD, MD, TD, COSTING, FACTORY) – full sample + lookups read/write */
+/** ADMIN or sample-editor roles – full sample + lookups read/write */
 export const requireSampleEditor = (req, res, next) => {
   if (!req.user) return res.status(401).json({ error: 'Authentication required' });
   if (!roleMatch(req, SAMPLE_EDITORS)) return res.status(403).json({ error: 'Insufficient permissions' });
@@ -78,21 +88,21 @@ export const requireSampleRead = (req, res, next) => {
   next();
 };
 
-/** Create sample: only ADMIN, SUPER_ADMIN, PD */
+/** Create sample: only ADMIN, PBD */
 export const requireSampleCreate = (req, res, next) => {
   if (!req.user) return res.status(401).json({ error: 'Authentication required' });
-  if (!roleMatch(req, SAMPLE_CREATE)) return res.status(403).json({ error: 'Only Admin or PD can create samples' });
+  if (!roleMatch(req, SAMPLE_CREATE)) return res.status(403).json({ error: 'Only Admin or PBD can create samples' });
   next();
 };
 
-/** Update/delete the sample record (samples table): only ADMIN, SUPER_ADMIN, PD. Other roles edit only their stage tables. */
+/** Update/delete the sample record: only ADMIN, PBD. Other roles edit only their stage tables. */
 export const requireSampleUpdate = (req, res, next) => {
   if (!req.user) return res.status(401).json({ error: 'Authentication required' });
-  if (!roleMatch(req, SAMPLE_CREATE)) return res.status(403).json({ error: 'Only Admin or PD can update or delete the sample record' });
+  if (!roleMatch(req, SAMPLE_CREATE)) return res.status(403).json({ error: 'Only Admin or PBD can update or delete the sample record' });
   next();
 };
 
-/** Write to stage tables and shipping (each role updates their own stage via stages API) */
+/** Write to stage tables and shipping */
 export const requireSampleWrite = (req, res, next) => {
   if (!req.user) return res.status(401).json({ error: 'Authentication required' });
   if (!roleMatch(req, SAMPLE_EDITORS)) return res.status(403).json({ error: 'Insufficient permissions' });

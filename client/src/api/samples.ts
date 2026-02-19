@@ -5,10 +5,11 @@ export async function listSamples(filters?: SampleFilters): Promise<Sample[]> {
   const params = new URLSearchParams()
   if (filters?.season_id) params.append("season_id", String(filters.season_id))
   if (filters?.brand_id) params.append("brand_id", String(filters.brand_id))
-  if (filters?.division_id) params.append("division_id", String(filters.division_id))
-  if (filters?.category_id) params.append("category_id", String(filters.category_id))
-  if (filters?.sample_type_id) params.append("sample_type_id", String(filters.sample_type_id))
-  
+  if (filters?.division) params.append("division", filters.division)
+  if (filters?.product_category) params.append("product_category", filters.product_category)
+  if (filters?.sample_type) params.append("sample_type", filters.sample_type)
+  if (filters?.sample_status) params.append("sample_status", filters.sample_status)
+
   const query = params.toString()
   const { data } = await apiClient.get<Sample[]>(`/samples${query ? `?${query}` : ""}`)
   return data

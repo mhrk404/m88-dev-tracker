@@ -28,13 +28,19 @@ export const getOne = async (req, res) => {
 
 export const create = async (req, res) => {
   try {
-    const { name, is_active = true } = req.body;
+    const { name, description, is_active = true } = req.body;
     if (!name?.trim()) return res.status(400).json({ error: 'name is required' });
-    const { data, error } = await supabase.from('divisions').insert({ name: name.trim(), is_active: !!is_active }).select('*').single();
+    const { data, error } = await supabase.from('divisions').insert({
+      name: name.trim(),
+      description: description?.trim() || null,
+      is_active: !!is_active,
+    }).select('*').single();
     if (error) {
       if (error.code === '23505') return res.status(409).json({ error: 'Division with this name already exists' });
       throw error;
     }
+    const { ip, userAgent } = auditMeta(req);
+    await logAudit({ userId: req.user?.id, action: 'create', resource: 'division', resourceId: String(data?.id), details: { name: data?.name }, ip, userAgent });
     return res.status(201).json(data);
   } catch (err) {
     console.error('divisions create:', err);
@@ -46,9 +52,10 @@ export const update = async (req, res) => {
   try {
     const id = Number(req.params.id);
     if (Number.isNaN(id)) return res.status(400).json({ error: 'Invalid id' });
-    const { name, is_active } = req.body;
+    const { name, description, is_active } = req.body;
     const updates = {};
     if (name !== undefined) updates.name = name.trim();
+    if (description !== undefined) updates.description = description.trim();
     if (is_active !== undefined) updates.is_active = !!is_active;
     if (Object.keys(updates).length === 0) return res.status(400).json({ error: 'No fields to update' });
     const { data, error } = await supabase.from('divisions').update(updates).eq('id', id).select('*').maybeSingle();

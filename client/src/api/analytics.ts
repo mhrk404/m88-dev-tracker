@@ -1,5 +1,9 @@
 import apiClient from "./client"
-import type { DashboardStats, PerformanceMetrics } from "@/types/analytics"
+import type {
+  DashboardStats,
+  SubmissionPerformanceResponse,
+  DeliveryPerformanceResponse,
+} from "@/types/analytics"
 
 export async function getDashboard(): Promise<DashboardStats> {
   const { data } = await apiClient.get<DashboardStats>("/analytics/dashboard")
@@ -10,8 +14,8 @@ export async function getSubmissionPerformance(params?: {
   brandId?: number
   month?: number
   year?: number
-}): Promise<PerformanceMetrics> {
-  const { data } = await apiClient.get<PerformanceMetrics>(
+}): Promise<SubmissionPerformanceResponse> {
+  const { data } = await apiClient.get<SubmissionPerformanceResponse>(
     "/analytics/submission-performance",
     { params }
   )
@@ -22,8 +26,8 @@ export async function getDeliveryPerformance(params?: {
   brandId?: number
   month?: number
   year?: number
-}): Promise<PerformanceMetrics> {
-  const { data } = await apiClient.get<PerformanceMetrics>(
+}): Promise<DeliveryPerformanceResponse> {
+  const { data } = await apiClient.get<DeliveryPerformanceResponse>(
     "/analytics/delivery-performance",
     { params }
   )

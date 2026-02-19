@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react"
 import { useNavigate } from "react-router-dom"
-import { Eye, Edit, Download } from "lucide-react"
+import { Eye, Edit, FileEdit, Download } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -31,19 +31,72 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Badge } from "@/components/ui/badge"
-import { listSamples } from "@/api/samples"
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "@/components/ui/dialog"
+import {
+  AlertDialog,
+  AlertDialogContent,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogCancel,
+} from "@/components/ui/alert-dialog"
+import { Label } from "@/components/ui/label"
+import { listSamples, getSample, updateSample } from "@/api/samples"
 import { getLookups } from "@/api/lookups"
 import { exportSamplesCsv } from "@/api/export"
-import type { Sample } from "@/types/sample"
+import type { Sample, UpdateSampleInput } from "@/types/sample"
 import type { Lookups } from "@/types/lookups"
 import type { SampleFilters } from "@/types/sample"
 import { useAuth } from "@/contexts/auth"
-import { canEditSample } from "@/lib/rbac"
+import { canEditSample, stageForRole } from "@/lib/rbac"
+import { STAGES } from "@/lib/constants"
 import type { RoleCode } from "@/lib/constants"
 import { toast } from "sonner"
 import { paginationRange } from "@/lib/pagination"
 
 const SAMPLES_PAGE_SIZE = 10
+
+const STAGE_LABELS: Record<string, string> = {
+  [STAGES.PSI]: "Product / Business Dev (PSI)",
+  [STAGES.SAMPLE_DEVELOPMENT]: "Sample Development",
+  [STAGES.PC_REVIEW]: "PC Review",
+  [STAGES.COSTING]: "Costing",
+  [STAGES.SCF]: "SCF",
+  [STAGES.SHIPMENT_TO_BRAND]: "Shipment to Brand",
+}
+
+const STAGE_OPTIONS = [
+  { value: STAGES.PSI, label: "Product / Business Dev (PSI)" },
+  { value: STAGES.SAMPLE_DEVELOPMENT, label: "Sample Development" },
+  { value: STAGES.PC_REVIEW, label: "PC Review" },
+  { value: STAGES.COSTING, label: "Costing" },
+  { value: STAGES.SCF, label: "SCF" },
+  { value: STAGES.SHIPMENT_TO_BRAND, label: "Shipment to Brand" },
+] as const
+
+const STAGE_ORDER: string[] = [
+  STAGES.PSI,
+  STAGES.SAMPLE_DEVELOPMENT,
+  STAGES.PC_REVIEW,
+  STAGES.COSTING,
+  STAGES.SCF,
+  STAGES.SHIPMENT_TO_BRAND,
+]
+
+function getNextStage(currentStage: string | null | undefined): string | null {
+  if (!currentStage) return STAGE_ORDER[0] ?? null
+  const idx = STAGE_ORDER.indexOf(currentStage)
+  if (idx === -1 || idx >= STAGE_ORDER.length - 1) return null
+  return STAGE_ORDER[idx + 1] ?? null
+}
 
 function normalizeStatus(status: string): string {
   return status.trim().toLowerCase().replace(/\s+/g, "_")
@@ -130,10 +183,129 @@ export default function SamplesListPage() {
   const [searchQuery, setSearchQuery] = useState("")
   const [statusFilter, setStatusFilter] = useState<string>("all")
   const [page, setPage] = useState(1)
+  const [editingSampleId, setEditingSampleId] = useState<string | null>(null)
+  const [editFormData, setEditFormData] = useState<UpdateSampleInput>({})
+  const [editFormLoading, setEditFormLoading] = useState(false)
+  const [editSaving, setEditSaving] = useState(false)
+  const [showSaveConfirm, setShowSaveConfirm] = useState(false)
 
   useEffect(() => {
     setPage(1)
   }, [filters, searchQuery, statusFilter])
+
+  useEffect(() => {
+    if (!editingSampleId || !lookups) return
+    setEditFormLoading(true)
+    getSample(editingSampleId)
+      .then((sample) => {
+        setEditFormData({
+          style_name: sample.style_name || "",
+          color: sample.color || "",
+          qty: sample.qty ?? undefined,
+          season_id: sample.season_id,
+          brand_id: sample.brand_id,
+          division: sample.division || "",
+          product_category: sample.product_category || "",
+          sample_type: sample.sample_type || "",
+          coo: sample.coo || "",
+          current_status: sample.current_status || "",
+          current_stage: sample.current_stage || "",
+        })
+      })
+      .catch(() => toast.error("Failed to load sample"))
+      .finally(() => setEditFormLoading(false))
+  }, [editingSampleId, lookups])
+
+  async function refreshSamples() {
+    try {
+      const data = await listSamples(filters)
+      setSamples(data)
+    } catch {
+      // keep current list
+    }
+  }
+
+  function handleEditSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    setShowSaveConfirm(true)
+  }
+
+  function doSave(moveToNextStage: boolean) {
+    if (!editingSampleId) return
+
+    // Build payload now before closing dialogs
+    let currentStage = editFormData.current_stage?.trim() || undefined
+    if (moveToNextStage) {
+      const next = getNextStage(editFormData.current_stage)
+      if (next) currentStage = next
+    }
+    const payload: UpdateSampleInput = {
+      ...editFormData,
+      style_name: editFormData.style_name?.trim() || undefined,
+      color: editFormData.color?.trim() || undefined,
+      qty: editFormData.qty,
+      coo: editFormData.coo?.trim() || undefined,
+      current_status: editFormData.current_status?.trim() || undefined,
+      current_stage: currentStage,
+    }
+    const sampleId = editingSampleId
+    const successMsg = moveToNextStage && currentStage
+      ? `Moved to next stage: ${STAGE_LABELS[currentStage] ?? currentStage}`
+      : "Sample updated"
+
+    // Close all dialogs immediately
+    setShowSaveConfirm(false)
+    setEditingSampleId(null)
+
+    // Countdown undo toast
+    const DELAY = 7
+    let remaining = DELAY
+    let cancelled = false
+
+    let intervalId: ReturnType<typeof setInterval>
+    let timeoutId: ReturnType<typeof setTimeout>
+
+    function cancel() {
+      cancelled = true
+      clearInterval(intervalId)
+      clearTimeout(timeoutId)
+      toast.dismiss(toastId)
+      toast.info("Save cancelled")
+    }
+
+    const toastId = toast.loading(`Saving in ${remaining}s — click Undo to cancel`, {
+      action: { label: "Undo", onClick: cancel },
+      duration: Infinity,
+    })
+
+    intervalId = setInterval(() => {
+      remaining--
+      if (remaining > 0) {
+        toast.loading(`Saving in ${remaining}s — click Undo to cancel`, {
+          id: toastId,
+          action: { label: "Undo", onClick: cancel },
+          duration: Infinity,
+        })
+      }
+    }, 1000)
+
+    timeoutId = setTimeout(async () => {
+      clearInterval(intervalId)
+      if (cancelled) return
+      toast.dismiss(toastId)
+      setEditSaving(true)
+      try {
+        await updateSample(sampleId, payload)
+        toast.success(successMsg)
+        await refreshSamples()
+      } catch (err: unknown) {
+        const msg = (err as { response?: { data?: { error?: string } } })?.response?.data?.error ?? "Failed to update sample"
+        toast.error(msg)
+      } finally {
+        setEditSaving(false)
+      }
+    }, DELAY * 1000)
+  }
 
   useEffect(() => {
     async function loadData() {
@@ -191,6 +363,13 @@ export default function SamplesListPage() {
   }, [filteredSamples, safePage])
 
   const canEdit = user ? canEditSample(user.roleCode as RoleCode) : false
+  const canEditStage =
+    user &&
+    (stageForRole(user.roleCode as RoleCode) !== null ||
+      user.roleCode === "ADMIN" ||
+      user.roleCode === "SUPER_ADMIN")
+  const userStage = user ? stageForRole(user.roleCode as RoleCode) : null
+  const stageFilterLabel = userStage ? STAGE_LABELS[userStage] ?? userStage : null
 
   async function onExport() {
     try {
@@ -321,9 +500,9 @@ export default function SamplesListPage() {
                 </Select>
 
                 <Select
-                  value={filters.division_id?.toString() || "all"}
+                  value={filters.division || "all"}
                   onValueChange={(value) =>
-                    setFilters({ ...filters, division_id: value === "all" ? undefined : Number(value) })
+                    setFilters({ ...filters, division: value === "all" ? undefined : value })
                   }
                 >
                   <SelectTrigger className="w-[180px]">
@@ -332,8 +511,27 @@ export default function SamplesListPage() {
                   <SelectContent>
                     <SelectItem value="all">All Divisions</SelectItem>
                     {lookups.divisions.map((division) => (
-                      <SelectItem key={division.id} value={division.id.toString()}>
+                      <SelectItem key={division.id} value={division.name}>
                         {division.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+
+                <Select
+                  value={filters.product_category || "all"}
+                  onValueChange={(value) =>
+                    setFilters({ ...filters, product_category: value === "all" ? undefined : value })
+                  }
+                >
+                  <SelectTrigger className="w-[180px]">
+                    <SelectValue placeholder="Category" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Categories</SelectItem>
+                    {lookups.product_categories.map((cat) => (
+                      <SelectItem key={cat.id} value={cat.name}>
+                        {cat.name}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -349,6 +547,11 @@ export default function SamplesListPage() {
           <CardTitle>Samples</CardTitle>
           <CardDescription>
             {filteredSamples.length} sample{filteredSamples.length !== 1 ? "s" : ""} found
+            {stageFilterLabel && (
+              <span className="block mt-1 text-muted-foreground">
+                Showing only samples at your stage ({stageFilterLabel}). Admins see all.
+              </span>
+            )}
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -367,6 +570,7 @@ export default function SamplesListPage() {
                     <TableHead>Season</TableHead>
                     <TableHead>Brand</TableHead>
                     <TableHead>Division</TableHead>
+                    <TableHead>Category</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead>Stage</TableHead>
                     <TableHead className="text-right">Actions</TableHead>
@@ -374,59 +578,89 @@ export default function SamplesListPage() {
                 </TableHeader>
                 <TableBody>
                   {pagedSamples.map((sample) => (
-                  <TableRow
-                    key={sample.id}
-                    className="cursor-pointer transition-colors hover:bg-muted/70"
-                    onClick={() => navigate(`/samples/${sample.id}`)}
-                  >
-                    <TableCell className="font-medium">{sample.style_number}</TableCell>
-                    <TableCell>{sample.style_name || "-"}</TableCell>
-                    <TableCell>{sample.color || "-"}</TableCell>
-                    <TableCell>
-                      {sample.seasons ? `${sample.seasons.name} ${sample.seasons.year}` : "-"}
-                    </TableCell>
-                    <TableCell>{sample.brands?.name || "-"}</TableCell>
-                    <TableCell>{sample.divisions?.name || "-"}</TableCell>
-                    <TableCell>
-                      {sample.current_status ? (
-                        <span className="inline-flex items-center gap-2">
-                          <span className={`h-2.5 w-2.5 rounded-full ${statusDotClass(sample.current_status)}`} />
-                          <Badge variant="outline" className={statusBadgeClass(sample.current_status)}>
-                            {sample.current_status}
-                          </Badge>
-                        </span>
-                      ) : (
-                        "-"
-                      )}
-                    </TableCell>
-                    <TableCell>
-                      {sample.current_stage ? (
-                        <Badge variant="secondary">{sample.current_stage}</Badge>
-                      ) : (
-                        "-"
-                      )}
-                    </TableCell>
-                    <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
-                      <div className="flex justify-end gap-2">
-                        <Button
-                          variant="ghost"
-                          size="icon-xs"
-                          onClick={() => navigate(`/samples/${sample.id}`)}
-                        >
-                          <Eye className="h-4 w-4" />
-                        </Button>
-                        {canEdit && (
+                    <TableRow
+                      key={sample.id}
+                      className="transition-colors hover:bg-muted/50"
+                    >
+                      <TableCell className="font-medium">{sample.style_number}</TableCell>
+                      <TableCell>{sample.style_name || "-"}</TableCell>
+                      <TableCell>{sample.color || "-"}</TableCell>
+                      <TableCell>
+                        {sample.seasons ? `${sample.seasons.name} ${sample.seasons.year}` : "-"}
+                      </TableCell>
+                      <TableCell>{sample.brands?.name || "-"}</TableCell>
+                      <TableCell>{sample.division || "-"}</TableCell>
+                      <TableCell>{sample.product_category || "-"}</TableCell>
+                      <TableCell>
+                        {sample.current_status ? (
+                          <span className="inline-flex items-center gap-2">
+                            <span className={`h-2.5 w-2.5 rounded-full ${statusDotClass(sample.current_status)}`} />
+                            <Badge variant="outline" className={statusBadgeClass(sample.current_status)}>
+                              {sample.current_status}
+                            </Badge>
+                          </span>
+                        ) : (
+                          "-"
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        {sample.current_stage ? (
+                          <Badge variant="secondary">{sample.current_stage}</Badge>
+                        ) : (
+                          "-"
+                        )}
+                      </TableCell>
+                      <TableCell className="text-right" data-actions>
+                        <div className="flex justify-end gap-1" data-actions>
                           <Button
                             variant="ghost"
                             size="icon-xs"
-                            onClick={() => navigate(`/samples/${sample.id}/edit`)}
+                            aria-label="View"
+                            type="button"
+                            onClick={(e) => {
+                              e.preventDefault()
+                              e.stopPropagation()
+                              navigate(`/samples/${sample.id}`)
+                            }}
                           >
-                            <Edit className="h-4 w-4" />
+                            <Eye className="h-4 w-4" />
                           </Button>
-                        )}
-                      </div>
-                    </TableCell>
-                  </TableRow>
+                          {canEdit && (
+                            <button
+                              type="button"
+                              aria-label="Edit sample"
+                              className="inline-flex size-6 items-center justify-center rounded-md hover:bg-accent hover:text-accent-foreground [&_svg]:size-3"
+                              onMouseDown={(e) => {
+                                e.preventDefault()
+                                e.stopPropagation()
+                              }}
+                              onClick={(e) => {
+                                e.preventDefault()
+                                e.stopPropagation()
+                                setEditingSampleId(sample.id)
+                              }}
+                            >
+                              <Edit className="h-4 w-4" />
+                            </button>
+                          )}
+                          {canEditStage && (
+                            <Button
+                              variant="ghost"
+                              size="icon-xs"
+                              aria-label="Edit stage"
+                              type="button"
+                              onClick={(e) => {
+                                e.preventDefault()
+                                e.stopPropagation()
+                                navigate(`/samples/${sample.id}/stage-edit`)
+                              }}
+                            >
+                              <FileEdit className="h-4 w-4" />
+                            </Button>
+                          )}
+                        </div>
+                      </TableCell>
+                    </TableRow>
                   ))}
                 </TableBody>
               </Table>
@@ -481,6 +715,259 @@ export default function SamplesListPage() {
           )}
         </CardContent>
       </Card>
+
+      <Dialog open={!!editingSampleId} onOpenChange={(open) => !open && setEditingSampleId(null)}>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Edit sample</DialogTitle>
+            <DialogDescription>
+              Update the sample details. Changes are saved to the list.
+            </DialogDescription>
+          </DialogHeader>
+          {editFormLoading ? (
+            <div className="py-8 text-center text-muted-foreground text-sm">Loading...</div>
+          ) : lookups ? (
+            <form onSubmit={handleEditSubmit} className="space-y-4">
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Style name</Label>
+                  <Input
+                    value={editFormData.style_name ?? ""}
+                    onChange={(e) => setEditFormData({ ...editFormData, style_name: e.target.value })}
+                    className="h-8 text-sm"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Color</Label>
+                  <Input
+                    value={editFormData.color ?? ""}
+                    onChange={(e) => setEditFormData({ ...editFormData, color: e.target.value })}
+                    className="h-8 text-sm"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Quantity</Label>
+                  <Input
+                    type="number"
+                    value={editFormData.qty ?? ""}
+                    onChange={(e) =>
+                      setEditFormData({
+                        ...editFormData,
+                        qty: e.target.value ? Number(e.target.value) : undefined,
+                      })
+                    }
+                    className="h-8 text-sm"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs">COO</Label>
+                  <Input
+                    value={editFormData.coo ?? ""}
+                    onChange={(e) => setEditFormData({ ...editFormData, coo: e.target.value })}
+                    className="h-8 text-sm"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Season</Label>
+                  <Select
+                    value={String(editFormData.season_id ?? "")}
+                    onValueChange={(v) =>
+                      setEditFormData({ ...editFormData, season_id: Number(v) })
+                    }
+                  >
+                    <SelectTrigger className="h-8 text-sm">
+                      <SelectValue placeholder="Season" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {lookups.seasons.map((s) => (
+                        <SelectItem key={s.id} value={String(s.id)}>
+                          {s.name} {s.year}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Brand</Label>
+                  <Select
+                    value={String(editFormData.brand_id ?? "")}
+                    onValueChange={(v) =>
+                      setEditFormData({ ...editFormData, brand_id: Number(v) })
+                    }
+                  >
+                    <SelectTrigger className="h-8 text-sm">
+                      <SelectValue placeholder="Brand" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {lookups.brands.map((b) => (
+                        <SelectItem key={b.id} value={String(b.id)}>
+                          {b.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Division</Label>
+                  <Select
+                    value={editFormData.division || ""}
+                    onValueChange={(v) =>
+                      setEditFormData({ ...editFormData, division: v })
+                    }
+                  >
+                    <SelectTrigger className="h-8 text-sm">
+                      <SelectValue placeholder="Division" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {lookups.divisions.map((d) => (
+                        <SelectItem key={d.id} value={d.name}>
+                          {d.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Category</Label>
+                  <Select
+                    value={editFormData.product_category || ""}
+                    onValueChange={(v) =>
+                      setEditFormData({ ...editFormData, product_category: v })
+                    }
+                  >
+                    <SelectTrigger className="h-8 text-sm">
+                      <SelectValue placeholder="Category" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {lookups.product_categories.map((c) => (
+                        <SelectItem key={c.id} value={c.name}>
+                          {c.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Sample type</Label>
+                  <Select
+                    value={editFormData.sample_type || ""}
+                    onValueChange={(v) =>
+                      setEditFormData({ ...editFormData, sample_type: v })
+                    }
+                  >
+                    <SelectTrigger className="h-8 text-sm">
+                      <SelectValue placeholder="Sample type" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {lookups.sample_types.map((t) => (
+                        <SelectItem key={t.id} value={t.name}>
+                          {t.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1.5 sm:col-span-2">
+                  <Label className="text-xs">Current status</Label>
+                  <Input
+                    placeholder="e.g. In Development"
+                    value={editFormData.current_status ?? ""}
+                    onChange={(e) =>
+                      setEditFormData({ ...editFormData, current_status: e.target.value })
+                    }
+                    className="h-8 text-sm"
+                  />
+                </div>
+                <div className="space-y-1.5 sm:col-span-2">
+                  <Label className="text-xs">Current stage</Label>
+                  <Select
+                    value={editFormData.current_stage ?? ""}
+                    onValueChange={(v) =>
+                      setEditFormData({ ...editFormData, current_stage: v })
+                    }
+                  >
+                    <SelectTrigger className="h-8 text-sm">
+                      <SelectValue placeholder="Stage" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {STAGE_OPTIONS.map((opt) => (
+                        <SelectItem key={opt.value} value={opt.value}>
+                          {opt.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+              <DialogFooter>
+                <Button
+                  type="button"
+                  variant="outline"
+                  onClick={() => setEditingSampleId(null)}
+                  disabled={editSaving}
+                >
+                  Cancel
+                </Button>
+                <Button type="submit" disabled={editSaving}>
+                  {editSaving ? "Saving..." : "Save"}
+                </Button>
+              </DialogFooter>
+            </form>
+          ) : null}
+        </DialogContent>
+      </Dialog>
+
+      <AlertDialog open={showSaveConfirm} onOpenChange={setShowSaveConfirm}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Confirm update</AlertDialogTitle>
+            <AlertDialogDescription>
+              {(() => {
+                const current = editFormData.current_stage?.trim() || null
+                const next = getNextStage(current)
+                const currentLabel = current ? (STAGE_LABELS[current] ?? current) : "—"
+                const nextLabel = next ? (STAGE_LABELS[next] ?? next) : "—"
+                if (next) {
+                  return (
+                    <>
+                      Save your changes and move this sample to the next stage?
+                      <span className="mt-2 block font-medium text-foreground">
+                        Current: {currentLabel} → Next: {nextLabel}
+                      </span>
+                    </>
+                  )
+                }
+                return (
+                  <>
+                    Save your changes without moving to a new stage?
+                    <span className="mt-2 block text-muted-foreground">
+                      (Already at final stage: {currentLabel})
+                    </span>
+                  </>
+                )
+              })()}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={editSaving}>Cancel</AlertDialogCancel>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={editSaving}
+              onClick={() => doSave(false)}
+            >
+              {editSaving ? "Saving..." : "Save only"}
+            </Button>
+            <Button
+              type="button"
+              disabled={editSaving || !getNextStage(editFormData.current_stage)}
+              onClick={() => doSave(true)}
+            >
+              {editSaving ? "Saving..." : "Save & move to next stage"}
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }

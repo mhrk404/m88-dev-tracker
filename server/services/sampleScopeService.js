@@ -1,38 +1,50 @@
 import { supabase } from '../config/supabase.js';
 
-const STAGE_TABLES = ['product_business_dev', 'technical_design', 'factory_execution', 'merchandising_review', 'costing_analysis'];
-
 /**
- * For USER role: return sample IDs the user is allowed to see (created by them or owner in any stage).
- * For other roles returns null (no filter = see all).
- * @param {number} userId
- * @returns {Promise<string[]|null>} Array of sample UUIDs or null if no filter
+ * For specific roles (FTY, Brand, etc.): return sample IDs where the user is tagged in team_assignment
+ * or is the creator.
+ * ADMIN role returns null (sees everything).
  */
-export async function getAllowedSampleIds(userId) {
-  const created = await supabase.from('samples').select('id').eq('created_by', userId);
-  if (created.error) throw created.error;
-  const fromCreated = (created.data ?? []).map((r) => r.id);
+export async function getAllowedSampleIds(userId, roleCode) {
+  const code = (roleCode || '').toUpperCase();
+  if (code === 'ADMIN') return null;
 
-  const fromStages = new Set();
-  for (const table of STAGE_TABLES) {
-    if (table === 'costing_analysis') {
-      const { data } = await supabase.from(table).select('sample_id').or(`analyst_id.eq.${userId},brand_communication_owner_id.eq.${userId}`);
-      if (data) data.forEach((r) => fromStages.add(r.sample_id));
-    } else {
-      const { data } = await supabase.from(table).select('sample_id').eq('owner_id', userId);
-      if (data) data.forEach((r) => fromStages.add(r.sample_id));
-    }
-  }
+  // 1. Get samples where user is the creator
+  const { data: created, error: err1 } = await supabase
+    .from('sample_request')
+    .select('sample_id')
+    .eq('created_by', userId);
 
-  const merged = [...new Set([...fromCreated, ...fromStages])];
-  return merged.length ? merged : [];
+  if (err1) throw err1;
+  const ids = new Set((created || []).map(r => r.sample_id));
+
+  // 2. Get samples where user is assigned in team_assignment
+  const assignmentQuery = `
+    pbd_user_id.eq.${userId},
+    td_user_id.eq.${userId},
+    fty_user_id.eq.${userId},
+    fty_md2_user_id.eq.${userId},
+    md_user_id.eq.${userId},
+    costing_user_id.eq.${userId}
+  `;
+
+  const { data: assigned, error: err2 } = await supabase
+    .from('team_assignment')
+    .select('sample_id')
+    .or(assignmentQuery.replace(/\n/g, '').trim());
+
+  if (err2) throw err2;
+  (assigned || []).forEach(r => ids.add(r.sample_id));
+
+  return [...ids];
 }
 
 /**
- * Check if user can access this sample. For USER role, must be in allowed list; for others, true.
+ * Check if user can access this specific sample.
  */
 export async function canAccessSample(userId, roleCode, sampleId) {
-  if ((roleCode || '').toUpperCase() !== 'USER') return true;
-  const allowed = await getAllowedSampleIds(userId);
-  return allowed.includes(sampleId);
+  if ((roleCode || '').toUpperCase() === 'ADMIN') return true;
+  const allowed = await getAllowedSampleIds(userId, roleCode);
+  return allowed === null || allowed.includes(sampleId);
 }
+

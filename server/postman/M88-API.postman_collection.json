@@ -2,108 +2,88 @@
   "info": {
     "name": "M88 Dev Tracker API",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
-    "description": "**Base URL:** {{baseUrl}} (default http://localhost:5000/api)\n\n**RBAC:** All endpoints except Login require **Authorization: Bearer {{token}}**. Register and users/roles management: **ADMIN or SUPER_ADMIN** only. Roles: SUPER_ADMIN, ADMIN, PD, MD, TD, COSTING, FACTORY.\n\n**Sample record:** Only ADMIN, SUPER_ADMIN, PD can create, update, or delete the sample (samples table). MD, TD, COSTING, FACTORY cannot edit the sample record; they only edit their own stage table via Stages API.\n\n**Stage visibility:** PD/MD/TD/COSTING/FACTORY see only their stage when reading full/stages; ADMIN and SUPER_ADMIN see all.\n\n**Data:** Seed brands: Vans, North Face, Marmot, Mammut, Burton. Places (COO, shipping origin/destination): Indonesia, China only.\n\n**How to test:**\n1. **Auth → Login** as admin (or pd.dev, md.user, td.user, costing.user from seed). Token is saved automatically.\n2. **Auth → Register** (ADMIN only): use to create new users; requires token from step 1.\n3. **Auth → Logout** logs out (audited); client should discard token.\n4. **Lookups → Get all lookups** for dropdowns.\n5. **Samples → List samples** (sets sampleId from first result for nested routes).\n6. Set **id** or **sampleId** / **shippingId** in collection variables as needed. Export supports ?format=csv."
+    "description": "**Base URL:** {{baseUrl}} (default http://localhost:5000/api)\n\n**RBAC Roles:** PBD, TD, FTY, MD, COSTING, BRAND, ADMIN.\n\n**Schema Logic:** The system uses a specialized schema for sample lifecycle tracking. Stages include **PSI, SAMPLE_DEVELOPMENT, PC_REVIEW, COSTING, SCF, SHIPMENT_TO_BRAND**.\n\n**How to test:**\n1. **Auth → Login** as admin (password123). Token is saved automatically.\n2. **Lookups/Brands/Seasons** to get context IDs.\n3. **Styles → Create style** to get a `style_id`.\n4. **Samples → Create sample** using that `style_id`.\n5. Use **Stages → Update stage** to progress the sample.\n6. Check **Analytics** for performance metrics."
   },
   "variable": [
-    { "key": "baseUrl", "value": "http://localhost:5000/api" },
-    { "key": "token", "value": "" },
-    { "key": "id", "value": "1" },
-    { "key": "sampleId", "value": "" },
-    { "key": "shippingId", "value": "" }
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:5000/api"
+    },
+    {
+      "key": "token",
+      "value": ""
+    },
+    {
+      "key": "id",
+      "value": "1"
+    },
+    {
+      "key": "style_id",
+      "value": "1"
+    },
+    {
+      "key": "sampleId",
+      "value": ""
+    }
   ],
   "item": [
     {
       "name": "Auth",
       "item": [
         {
-          "name": "Register",
-          "request": {
-            "method": "POST",
-            "header": [
-              { "key": "Content-Type", "value": "application/json" },
-              { "key": "Authorization", "value": "Bearer {{token}}" }
-            ],
-            "body": {
-              "mode": "raw",
-              "raw": "{\n  \"username\": \"newuser\",\n  \"email\": \"new@example.com\",\n  \"password\": \"Password1!\",\n  \"role_code\": \"ADMIN\"\n}"
-            },
-            "url": "{{baseUrl}}/auth/register",
-            "description": "ADMIN or SUPER_ADMIN only. Creates a new user. Min password 8 chars. role_code: SUPER_ADMIN, ADMIN, PD, MD, TD, COSTING, FACTORY. Login as admin first to get token."
-          }
-        },
-        {
           "name": "Login",
           "event": [
             {
               "listen": "test",
               "script": {
-                "exec": "if (pm.response.code === 200) {\n  const j = pm.response.json();\n  if (j.token) pm.collectionVariables.set('token', j.token);\n  pm.test('Login OK', () => pm.response.to.have.status(200));\n}"
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "  const j = pm.response.json();",
+                  "  if (j.token) pm.collectionVariables.set('token', j.token);",
+                  "}"
+                ]
               }
             }
           ],
           "request": {
             "method": "POST",
-            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"username\": \"admin\",\n  \"password\": \"Password1!\"\n}"
+              "raw": "{\n  \"username\": \"admin\",\n  \"password\": \"password123\"\n}"
             },
-            "url": "{{baseUrl}}/auth/login",
-            "description": "Saves token to collection variable. Seed users: admin, pd.dev, md.user, td.user, costing.user (set password via 005 migration / DB)."
+            "url": "{{baseUrl}}/auth/login"
           }
         },
         {
-          "name": "Me (current user)",
+          "name": "Me",
           "request": {
             "method": "GET",
-            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
-            "url": "{{baseUrl}}/auth/me",
-            "description": "Returns current user. Requires valid token (run Login first)."
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": "{{baseUrl}}/auth/me"
           }
         },
         {
           "name": "Logout",
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "exec": "if (pm.response.code === 204 || pm.response.code === 200) {\n  pm.collectionVariables.set('token', '');\n  pm.test('Logout OK, token cleared', () => pm.response.to.have.status(204));\n}\n"
-              }
-            }
-          ],
           "request": {
             "method": "POST",
-            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
-            "url": "{{baseUrl}}/auth/logout",
-            "description": "Logs logout to audit_log and returns 204. Collection token is cleared automatically so subsequent requests are unauthenticated."
-          }
-        }
-      ]
-    },
-    {
-      "name": "Lookups",
-      "item": [
-        {
-          "name": "Get all lookups",
-          "request": {
-            "method": "GET",
-            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
-            "url": "{{baseUrl}}/lookups",
-            "description": "Returns brands, seasons, divisions, product_categories, sample_types, roles. Use for dropdowns. Requires auth."
-          }
-        },
-        {
-          "name": "Get lookups by type",
-          "request": {
-            "method": "GET",
-            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
-            "url": {
-              "raw": "{{baseUrl}}/lookups?type=brands",
-              "host": ["{{baseUrl}}"],
-              "path": ["lookups"],
-              "query": [{ "key": "type", "value": "brands", "description": "brands | seasons | divisions | product_categories | sample_types | roles" }]
-            },
-            "description": "Single lookup type. Change query param: brands, seasons, divisions, product_categories, sample_types, roles."
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": "{{baseUrl}}/auth/logout"
           }
         }
       ]
@@ -111,197 +91,170 @@
     {
       "name": "Users",
       "item": [
-        { "name": "List users", "request": { "method": "GET", "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }], "url": "{{baseUrl}}/users", "description": "ADMIN only." } },
-        { "name": "Get user by id", "request": { "method": "GET", "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }], "url": "{{baseUrl}}/users/{{id}}", "description": "ADMIN only." } },
+        {
+          "name": "List users",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": "{{baseUrl}}/users"
+          }
+        },
+        {
+          "name": "Get user by id",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": "{{baseUrl}}/users/{{id}}"
+          }
+        },
         {
           "name": "Create user",
           "request": {
             "method": "POST",
-            "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Authorization", "value": "Bearer {{token}}" }],
-            "body": { "mode": "raw", "raw": "{\n  \"username\": \"newuser\",\n  \"email\": \"new@example.com\",\n  \"full_name\": \"New User\",\n  \"department\": \"Dev\",\n  \"role_id\": 1\n}" },
-            "url": "{{baseUrl}}/users",
-            "description": "ADMIN only."
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"janelle.pbd\",\n  \"email\": \"janelle@madison88.com\",\n  \"full_name\": \"Janelle PBD\",\n  \"role_code\": \"PBD\",\n  \"password\": \"password123\"\n}"
+            },
+            "url": "{{baseUrl}}/auth/register"
           }
-        },
-        {
-          "name": "Update user",
-          "request": {
-            "method": "PUT",
-            "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Authorization", "value": "Bearer {{token}}" }],
-            "body": { "mode": "raw", "raw": "{\n  \"full_name\": \"Updated Name\",\n  \"department\": \"PD\"\n}" },
-            "url": "{{baseUrl}}/users/{{id}}",
-            "description": "ADMIN only."
-          }
-        },
-        { "name": "Delete user", "request": { "method": "DELETE", "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }], "url": "{{baseUrl}}/users/{{id}}", "description": "ADMIN only." } }
+        }
       ]
     },
     {
       "name": "Brands",
       "item": [
-        { "name": "List brands", "request": { "method": "GET", "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }], "url": "{{baseUrl}}/brands" } },
-        { "name": "Get brand by id", "request": { "method": "GET", "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }], "url": "{{baseUrl}}/brands/{{id}}" } },
+        {
+          "name": "List brands",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": "{{baseUrl}}/brands"
+          }
+        },
         {
           "name": "Create brand",
           "request": {
             "method": "POST",
-            "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Authorization", "value": "Bearer {{token}}" }],
-            "body": { "mode": "raw", "raw": "{\n  \"name\": \"Brand X\",\n  \"is_active\": true\n}" },
-            "url": "{{baseUrl}}/brands",
-            "description": "ADMIN only."
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"name\": \"511 Tactical\",\n  \"contact\": \"brand-contact@511.com\"\n}"
+            },
+            "url": "{{baseUrl}}/brands"
           }
-        },
-        {
-          "name": "Update brand",
-          "request": {
-            "method": "PUT",
-            "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Authorization", "value": "Bearer {{token}}" }],
-            "body": { "mode": "raw", "raw": "{\n  \"name\": \"Brand X Updated\",\n  \"is_active\": true\n}" },
-            "url": "{{baseUrl}}/brands/{{id}}",
-            "description": "ADMIN only."
-          }
-        },
-        { "name": "Delete brand", "request": { "method": "DELETE", "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }], "url": "{{baseUrl}}/brands/{{id}}", "description": "ADMIN only." } }
+        }
       ]
     },
     {
       "name": "Seasons",
       "item": [
-        { "name": "List seasons", "request": { "method": "GET", "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }], "url": "{{baseUrl}}/seasons" } },
-        { "name": "Get season by id", "request": { "method": "GET", "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }], "url": "{{baseUrl}}/seasons/{{id}}" } },
+        {
+          "name": "List seasons",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": "{{baseUrl}}/seasons"
+          }
+        },
         {
           "name": "Create season",
           "request": {
             "method": "POST",
-            "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Authorization", "value": "Bearer {{token}}" }],
-            "body": { "mode": "raw", "raw": "{\n  \"name\": \"SS25\",\n  \"year\": 2025,\n  \"start_date\": \"2025-01-01\",\n  \"end_date\": \"2025-06-30\",\n  \"is_active\": true\n}" },
-            "url": "{{baseUrl}}/seasons",
-            "description": "ADMIN only."
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"code\": \"S27\",\n  \"year\": 2027\n}"
+            },
+            "url": "{{baseUrl}}/seasons"
           }
-        },
-        {
-          "name": "Update season",
-          "request": {
-            "method": "PUT",
-            "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Authorization", "value": "Bearer {{token}}" }],
-            "body": { "mode": "raw", "raw": "{\n  \"name\": \"SS25\",\n  \"year\": 2025,\n  \"is_active\": true\n}" },
-            "url": "{{baseUrl}}/seasons/{{id}}",
-            "description": "ADMIN only."
-          }
-        },
-        { "name": "Delete season", "request": { "method": "DELETE", "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }], "url": "{{baseUrl}}/seasons/{{id}}", "description": "ADMIN only." } }
+        }
       ]
     },
     {
-      "name": "Divisions",
+      "name": "Styles",
       "item": [
-        { "name": "List divisions", "request": { "method": "GET", "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }], "url": "{{baseUrl}}/divisions" } },
-        { "name": "Get division by id", "request": { "method": "GET", "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }], "url": "{{baseUrl}}/divisions/{{id}}" } },
         {
-          "name": "Create division",
+          "name": "List styles",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": "{{baseUrl}}/styles"
+          }
+        },
+        {
+          "name": "Create style",
           "request": {
             "method": "POST",
-            "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Authorization", "value": "Bearer {{token}}" }],
-            "body": { "mode": "raw", "raw": "{\n  \"name\": \"Apparel\",\n  \"is_active\": true\n}" },
-            "url": "{{baseUrl}}/divisions",
-            "description": "ADMIN only."
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"brand_id\": 1,\n  \"season_id\": 1,\n  \"style_number\": \"7890075\",\n  \"style_name\": \"TRUE NORTH MRNO BNIE\",\n  \"division\": \"In Line\",\n  \"product_category\": \"Beanie\",\n  \"color\": \"available\",\n  \"qty\": 3,\n  \"coo\": \"Indonesia\"\n}"
+            },
+            "url": "{{baseUrl}}/styles"
           }
-        },
-        {
-          "name": "Update division",
-          "request": {
-            "method": "PUT",
-            "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Authorization", "value": "Bearer {{token}}" }],
-            "body": { "mode": "raw", "raw": "{\n  \"name\": \"Apparel\",\n  \"is_active\": true\n}" },
-            "url": "{{baseUrl}}/divisions/{{id}}",
-            "description": "ADMIN only."
-          }
-        },
-        { "name": "Delete division", "request": { "method": "DELETE", "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }], "url": "{{baseUrl}}/divisions/{{id}}", "description": "ADMIN only." } }
-      ]
-    },
-    {
-      "name": "Product categories",
-      "item": [
-        { "name": "List product categories", "request": { "method": "GET", "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }], "url": "{{baseUrl}}/product-categories" } },
-        { "name": "Get product category by id", "request": { "method": "GET", "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }], "url": "{{baseUrl}}/product-categories/{{id}}" } },
-        {
-          "name": "Create product category",
-          "request": {
-            "method": "POST",
-            "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Authorization", "value": "Bearer {{token}}" }],
-            "body": { "mode": "raw", "raw": "{\n  \"name\": \"Tops\",\n  \"parent_id\": null,\n  \"is_active\": true\n}" },
-            "url": "{{baseUrl}}/product-categories",
-            "description": "ADMIN only."
-          }
-        },
-        {
-          "name": "Update product category",
-          "request": {
-            "method": "PUT",
-            "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Authorization", "value": "Bearer {{token}}" }],
-            "body": { "mode": "raw", "raw": "{\n  \"name\": \"Tops\",\n  \"is_active\": true\n}" },
-            "url": "{{baseUrl}}/product-categories/{{id}}",
-            "description": "ADMIN only."
-          }
-        },
-        { "name": "Delete product category", "request": { "method": "DELETE", "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }], "url": "{{baseUrl}}/product-categories/{{id}}", "description": "ADMIN only." } }
-      ]
-    },
-    {
-      "name": "Sample types",
-      "item": [
-        { "name": "List sample types", "request": { "method": "GET", "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }], "url": "{{baseUrl}}/sample-types" } },
-        { "name": "Get sample type by id", "request": { "method": "GET", "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }], "url": "{{baseUrl}}/sample-types/{{id}}" } },
-        {
-          "name": "Create sample type",
-          "request": {
-            "method": "POST",
-            "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Authorization", "value": "Bearer {{token}}" }],
-            "body": { "mode": "raw", "raw": "{\n  \"name\": \"Proto\",\n  \"group\": \"Development\",\n  \"is_active\": true\n}" },
-            "url": "{{baseUrl}}/sample-types",
-            "description": "ADMIN only."
-          }
-        },
-        {
-          "name": "Update sample type",
-          "request": {
-            "method": "PUT",
-            "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Authorization", "value": "Bearer {{token}}" }],
-            "body": { "mode": "raw", "raw": "{\n  \"name\": \"Proto\",\n  \"group\": \"Development\",\n  \"is_active\": true\n}" },
-            "url": "{{baseUrl}}/sample-types/{{id}}",
-            "description": "ADMIN only."
-          }
-        },
-        { "name": "Delete sample type", "request": { "method": "DELETE", "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }], "url": "{{baseUrl}}/sample-types/{{id}}", "description": "ADMIN only." } }
-      ]
-    },
-    {
-      "name": "Roles",
-      "item": [
-        { "name": "List roles", "request": { "method": "GET", "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }], "url": "{{baseUrl}}/roles" } },
-        { "name": "Get role by id", "request": { "method": "GET", "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }], "url": "{{baseUrl}}/roles/{{id}}" } },
-        {
-          "name": "Create role",
-          "request": {
-            "method": "POST",
-            "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Authorization", "value": "Bearer {{token}}" }],
-            "body": { "mode": "raw", "raw": "{\n  \"name\": \"Viewer\",\n  \"code\": \"VIEWER\",\n  \"is_active\": true\n}" },
-            "url": "{{baseUrl}}/roles",
-            "description": "ADMIN only."
-          }
-        },
-        {
-          "name": "Update role",
-          "request": {
-            "method": "PUT",
-            "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Authorization", "value": "Bearer {{token}}" }],
-            "body": { "mode": "raw", "raw": "{\n  \"name\": \"Viewer\",\n  \"code\": \"VIEWER\",\n  \"is_active\": true\n}" },
-            "url": "{{baseUrl}}/roles/{{id}}",
-            "description": "ADMIN only."
-          }
-        },
-        { "name": "Delete role", "request": { "method": "DELETE", "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }], "url": "{{baseUrl}}/roles/{{id}}", "description": "ADMIN only." } }
+        }
       ]
     },
     {
@@ -313,149 +266,158 @@
             {
               "listen": "test",
               "script": {
-                "exec": "if (pm.response.code === 200) {\n  const list = pm.response.json();\n  if (list && list[0] && list[0].id) pm.collectionVariables.set('sampleId', list[0].id);\n}"
+                "exec": [
+                  "if (pm.response.code === 200) {",
+                  "  const list = pm.response.json();",
+                  "  if (list && list[0] && list[0].sample_id) pm.collectionVariables.set('sampleId', list[0].sample_id);",
+                  "}"
+                ]
               }
             }
           ],
           "request": {
             "method": "GET",
-            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
-            "url": {
-              "raw": "{{baseUrl}}/samples",
-              "host": ["{{baseUrl}}"],
-              "path": ["samples"],
-              "query": [
-                { "key": "season_id", "value": "", "disabled": true },
-                { "key": "brand_id", "value": "", "disabled": true }
-              ]
-            },
-            "description": "Optional: test script sets sampleId from first result. Use for nested Stages/Shipping/Audit."
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": "{{baseUrl}}/samples"
           }
         },
-        { "name": "Get sample by id", "request": { "method": "GET", "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }], "url": "{{baseUrl}}/samples/{{sampleId}}" } },
         {
-          "name": "Get sample full (stages + shipping + audit)",
+          "name": "Get sample full",
           "request": {
             "method": "GET",
-            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
-            "url": "{{baseUrl}}/samples/{{sampleId}}/full",
-            "description": "Returns sample + stages + shipping + history + status_transitions. PD/MD/TD/COSTING/FACTORY get only their stage (others null); ADMIN and SUPER_ADMIN get full data."
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": "{{baseUrl}}/samples/{{sampleId}}/full"
           }
         },
         {
-          "name": "Create sample",
+          "name": "Create sample request",
           "request": {
             "method": "POST",
-            "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Authorization", "value": "Bearer {{token}}" }],
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
             "body": {
               "mode": "raw",
-              "raw": "{\n  \"style_number\": \"STYLE-001\",\n  \"style_name\": \"Classic Tee\",\n  \"color\": \"White\",\n  \"qty\": 2,\n  \"season_id\": 1,\n  \"brand_id\": 1,\n  \"division_id\": 1,\n  \"category_id\": 1,\n  \"sample_type_id\": 1,\n  \"coo\": \"Indonesia\",\n  \"current_status\": \"In Development\",\n  \"current_stage\": \"product_business_dev\",\n  \"created_by\": 1\n}"
+              "raw": "{\n  \"style_id\": 1,\n  \"sample_type\": \"P2\",\n  \"sample_status\": \"Active\",\n  \"sample_due_denver\": \"2025-10-28\",\n  \"kickoff_date\": \"2025-10-10\",\n  \"unfree_status\": \"Released\"\n}"
             },
-            "url": "{{baseUrl}}/samples",
-            "description": "ADMIN, SUPER_ADMIN, PD only. MD/TD/COSTING/FACTORY get 403."
+            "url": "{{baseUrl}}/samples"
           }
         },
         {
           "name": "Update sample",
           "request": {
             "method": "PUT",
-            "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Authorization", "value": "Bearer {{token}}" }],
-            "body": { "mode": "raw", "raw": "{\n  \"current_status\": \"Technical Design\",\n  \"current_stage\": \"technical_design\"\n}" },
-            "url": "{{baseUrl}}/samples/{{sampleId}}",
-            "description": "ADMIN, SUPER_ADMIN, PD only. Updates the sample record. MD/TD/COSTING/FACTORY get 403 (they edit only their stage via Stages)."
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"unfree_status\": \"Updated\",\n  \"sample_status\": \"On Hold\"\n}"
+            },
+            "url": "{{baseUrl}}/samples/{{sampleId}}"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Stages",
+      "item": [
+        {
+          "name": "Get stages",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": "{{baseUrl}}/samples/{{sampleId}}/stages"
           }
         },
-        { "name": "Delete sample", "request": { "method": "DELETE", "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }], "url": "{{baseUrl}}/samples/{{sampleId}}", "description": "ADMIN, SUPER_ADMIN, PD only. MD/TD/COSTING/FACTORY get 403." } },
         {
-          "name": "Sample – Stages",
-          "item": [
-            {
-              "name": "Get stages for sample",
-              "request": {
-                "method": "GET",
-                "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
-                "url": "{{baseUrl}}/samples/{{sampleId}}/stages",
-                "description": "Returns all stage keys; PD/MD/TD/COSTING/FACTORY see only their stage populated (others null). ADMIN and SUPER_ADMIN see all stages."
+          "name": "Update Stage (PSI)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
               }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"stage\": \"psi\",\n  \"sent_date\": \"2025-10-10\",\n  \"stage_status\": \"PSI_SENT\"\n}"
             },
-            {
-              "name": "Update stage for sample",
-              "request": {
-                "method": "PUT",
-                "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Authorization", "value": "Bearer {{token}}" }],
-                "body": {
-                  "mode": "raw",
-                  "raw": "{\n  \"stage\": \"product_business_dev\",\n  \"sample_due_denver\": \"2024-02-01\",\n  \"sample_sent_brand_date\": \"2024-01-28\",\n  \"sample_status\": \"Submitted\"\n}"
-                },
-                "url": "{{baseUrl}}/samples/{{sampleId}}/stages",
-                "description": "Body.stage required. Each role can only update their own stage: PD→product_business_dev, MD→merchandising_review, TD→technical_design, COSTING→costing_analysis, FACTORY→factory_execution. Otherwise 403.\n\nExtra fields: factory_execution accepts fty_md2 (user id, second FTY MD) and fty_costing_due_date (date). merchandising_review accepts td_to_md_comment (text, TD-to-MD comparison notes)."
-              }
-            }
-          ]
+            "url": "{{baseUrl}}/stages/{{sampleId}}"
+          }
         },
         {
-          "name": "Sample – Shipping",
-          "item": [
-            {
-              "name": "List shipping for sample",
-              "request": {
-                "method": "GET",
-                "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
-                "url": "{{baseUrl}}/samples/{{sampleId}}/shipping",
-                "description": "Set shippingId from response to use Update/Delete by id."
+          "name": "Update Stage (SHIPMENT)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
               }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"stage\": \"shipment_to_brand\",\n  \"sent_date\": \"2025-11-13\",\n  \"awb_number\": \"1ZW6B861...\",\n  \"stage_status\": \"DELIVERED\"\n}"
             },
-            {
-              "name": "Get shipping by id",
-              "request": { "method": "GET", "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }], "url": "{{baseUrl}}/samples/{{sampleId}}/shipping/{{shippingId}}" }
-            },
-            {
-              "name": "Create shipping record",
-              "request": {
-                "method": "POST",
-                "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "Authorization", "value": "Bearer {{token}}" }],
-                "body": {
-                  "mode": "raw",
-                  "raw": "{\n  \"awb\": \"AWB-001\",\n  \"origin\": \"Indonesia\",\n  \"destination\": \"China\",\n  \"estimated_arrival\": \"2024-02-05\",\n  \"actual_arrival\": null,\n  \"status\": \"In Transit\"\n}"
-                },
-                "url": "{{baseUrl}}/samples/{{sampleId}}/shipping"
-              }
-            },
-            {
-              "name": "Update shipping record",
-              "request": {
-                "method": "PUT",
-                "header": [
-                  { "key": "Content-Type", "value": "application/json" },
-                  { "key": "Authorization", "value": "Bearer {{token}}" }
-                ],
-                "body": { "mode": "raw", "raw": "{\n  \"status\": \"Delivered\",\n  \"actual_arrival\": \"2024-02-04\"\n}" },
-                "url": "{{baseUrl}}/samples/{{sampleId}}/shipping/{{shippingId}}"
-              }
-            },
-            {
-              "name": "Delete shipping record",
-              "request": {
-                "method": "DELETE",
-                "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
-                "url": "{{baseUrl}}/samples/{{sampleId}}/shipping/{{shippingId}}"
-              }
-            }
-          ]
-        },
+            "url": "{{baseUrl}}/stages/{{sampleId}}"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Audit",
+      "item": [
         {
-          "name": "Sample – Audit",
-          "item": [
-            {
-              "name": "Get audit for sample",
-              "request": {
-                "method": "GET",
-                "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
-                "url": "{{baseUrl}}/samples/{{sampleId}}/audit",
-                "description": "Returns history and status_transitions for the sample."
+          "name": "Get sample audit",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
               }
-            }
-          ]
+            ],
+            "url": "{{baseUrl}}/audit/{{sampleId}}"
+          }
         }
       ]
     },
@@ -463,138 +425,47 @@
       "name": "Analytics",
       "item": [
         {
-          "name": "Submission performance",
+          "name": "Submission Performance",
           "request": {
             "method": "GET",
-            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
-            "url": {
-              "raw": "{{baseUrl}}/analytics/submission-performance?year=2024&month=2",
-              "host": ["{{baseUrl}}"],
-              "path": ["analytics", "submission-performance"],
-              "query": [
-                { "key": "brandId", "value": "", "disabled": true },
-                { "key": "month", "value": "2", "description": "1-12" },
-                { "key": "year", "value": "2024" }
-              ]
-            },
-            "description": "Requires auth."
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": "{{baseUrl}}/analytics/submission-performance"
           }
         },
         {
-          "name": "Submission performance (stream)",
+          "name": "Dashboard",
           "request": {
             "method": "GET",
-            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
-            "url": {
-              "raw": "{{baseUrl}}/analytics/submission-performance/stream?intervalMs=10000",
-              "host": ["{{baseUrl}}"],
-              "path": ["analytics", "submission-performance", "stream"],
-              "query": [
-                { "key": "brandId", "value": "", "disabled": true },
-                { "key": "month", "value": "", "disabled": true },
-                { "key": "year", "value": "", "disabled": true },
-                { "key": "intervalMs", "value": "10000", "description": "min 5000" }
-              ]
-            },
-            "description": "SSE stream; sends data on connect and every intervalMs."
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": "{{baseUrl}}/analytics/dashboard"
           }
-        },
-        {
-          "name": "Delivery performance",
-          "request": {
-            "method": "GET",
-            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
-            "url": {
-              "raw": "{{baseUrl}}/analytics/delivery-performance?year=2024&month=2",
-              "host": ["{{baseUrl}}"],
-              "path": ["analytics", "delivery-performance"],
-              "query": [
-                { "key": "brandId", "value": "", "disabled": true },
-                { "key": "month", "value": "2" },
-                { "key": "year", "value": "2024" }
-              ]
-            },
-            "description": "Requires auth."
-          }
-        },
-        {
-          "name": "Delivery performance (stream)",
-          "request": {
-            "method": "GET",
-            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
-            "url": {
-              "raw": "{{baseUrl}}/analytics/delivery-performance/stream?intervalMs=10000",
-              "host": ["{{baseUrl}}"],
-              "path": ["analytics", "delivery-performance", "stream"],
-              "query": [{ "key": "intervalMs", "value": "10000" }]
-            }
-          }
-        },
-        { "name": "Dashboard", "request": { "method": "GET", "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }], "url": "{{baseUrl}}/analytics/dashboard", "description": "Requires auth." } },
-        { "name": "Pipeline (legacy)", "request": { "method": "GET", "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }], "url": "{{baseUrl}}/analytics/pipeline" } },
-        { "name": "By season (legacy)", "request": { "method": "GET", "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }], "url": "{{baseUrl}}/analytics/by-season" } },
-        { "name": "By brand (legacy)", "request": { "method": "GET", "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }], "url": "{{baseUrl}}/analytics/by-brand" } },
-        { "name": "By division (legacy)", "request": { "method": "GET", "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }], "url": "{{baseUrl}}/analytics/by-division" } },
-        { "name": "Delays (legacy)", "request": { "method": "GET", "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }], "url": "{{baseUrl}}/analytics/delays" } }
+        }
       ]
     },
     {
       "name": "Export",
       "item": [
         {
-          "name": "Export samples (JSON)",
+          "name": "Export Samples (CSV)",
           "request": {
             "method": "GET",
-            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
-            "url": {
-              "raw": "{{baseUrl}}/export/samples",
-              "host": ["{{baseUrl}}"],
-              "path": ["export", "samples"],
-              "query": [
-                { "key": "season_id", "value": "", "disabled": true },
-                { "key": "brand_id", "value": "", "disabled": true }
-              ]
-            }
-          }
-        },
-        {
-          "name": "Export samples (CSV)",
-          "request": {
-            "method": "GET",
-            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
-            "url": {
-              "raw": "{{baseUrl}}/export/samples?format=csv",
-              "host": ["{{baseUrl}}"],
-              "path": ["export", "samples"],
-              "query": [
-                { "key": "format", "value": "csv" },
-                { "key": "season_id", "value": "", "disabled": true },
-                { "key": "brand_id", "value": "", "disabled": true }
-              ]
-            },
-            "description": "Downloads CSV. Add season_id or brand_id to filter."
-          }
-        },
-        {
-          "name": "Export pipeline",
-          "request": {
-            "method": "GET",
-            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
-            "url": "{{baseUrl}}/export/pipeline",
-            "description": "Returns sample id, style_number, current_stage, current_status (limit 1000)."
-          }
-        },
-        {
-          "name": "Export analytics (JSON)",
-          "request": { "method": "GET", "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }], "url": "{{baseUrl}}/export/analytics" }
-        },
-        {
-          "name": "Export analytics (CSV)",
-          "request": {
-            "method": "GET",
-            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
-            "url": "{{baseUrl}}/export/analytics?format=csv",
-            "description": "CSV of submission + delivery rows."
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{token}}"
+              }
+            ],
+            "url": "{{baseUrl}}/export/samples?format=csv"
           }
         }
       ]

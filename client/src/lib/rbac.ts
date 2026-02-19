@@ -4,42 +4,40 @@ import type { RoleCode } from "./constants"
 import { ROLES, STAGES, type StageName } from "./constants"
 
 export function canManageUsers(roleCode: RoleCode): boolean {
-  return roleCode === ROLES.SUPER_ADMIN || roleCode === ROLES.ADMIN
+  return roleCode === ROLES.ADMIN
 }
 
 export function canCreateSample(roleCode: RoleCode): boolean {
   return (
-    roleCode === ROLES.SUPER_ADMIN ||
     roleCode === ROLES.ADMIN ||
-    roleCode === ROLES.PD
+    roleCode === ROLES.PBD
   )
 }
 
 export function canEditSample(roleCode: RoleCode): boolean {
   return (
-    roleCode === ROLES.SUPER_ADMIN ||
     roleCode === ROLES.ADMIN ||
-    roleCode === ROLES.PD
+    roleCode === ROLES.PBD
   )
 }
 
 export function stageForRole(roleCode: RoleCode): StageName | null {
   switch (roleCode) {
-    case ROLES.PD:
-      return STAGES.PRODUCT_BUSINESS_DEV
+    case ROLES.PBD:
+      return STAGES.PSI
     case ROLES.MD:
-      return STAGES.MERCHANDISING_REVIEW
+      return STAGES.PC_REVIEW
     case ROLES.TD:
-      return STAGES.TECHNICAL_DESIGN
+      return STAGES.SAMPLE_DEVELOPMENT
     case ROLES.COSTING:
-      return STAGES.COSTING_ANALYSIS
-    case ROLES.FACTORY:
-      return STAGES.FACTORY_EXECUTION
+      return STAGES.COSTING
+    case ROLES.FTY:
+      return STAGES.SAMPLE_DEVELOPMENT
     default:
       return null
   }
 }
 
 export function canAccessLookupsManagement(roleCode: RoleCode): boolean {
-  return roleCode === ROLES.SUPER_ADMIN || roleCode === ROLES.ADMIN
+  return roleCode === ROLES.ADMIN
 }

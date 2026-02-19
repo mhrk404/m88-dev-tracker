@@ -7,7 +7,7 @@ export async function listSeasons(): Promise<Season[]> {
 }
 
 type SeasonPayload = {
-  name: string
+  code: string
   year: number
   start_date?: string
   end_date?: string

@@ -9,44 +9,113 @@ function escapeCsvCell(val) {
 
 export const samples = async (req, res) => {
   try {
-    const format = (req.query.format || 'json').toLowerCase();
-    let q = supabase
-      .from('samples')
-      .select('id, style_number, style_name, color, qty, season_id, brand_id, division_id, category_id, sample_type_id, coo, current_status, current_stage, created_at, created_by, seasons(name, year), brands(name), divisions(name), product_categories(name), sample_types(name)')
-      .order('created_at', { ascending: false });
-    const { season_id, brand_id } = req.query;
-    if (season_id) q = q.eq('season_id', season_id);
-    if (brand_id) q = q.eq('brand_id', brand_id);
-    const { data, error } = await q;
+    const { format, brand_id, season_id } = req.query;
+
+    let query = supabase.from('sample_request').select(`
+      *,
+      styles(*, brands(*), seasons(*)),
+      team_assignment(
+        pbd:pbd_user_id(full_name),
+        td:td_user_id(full_name),
+        fty_md2:fty_md2_user_id(full_name),
+        md:md_user_id(full_name),
+        costing:costing_user_id(full_name)
+      ),
+      psi(*),
+      sample_development(*),
+      pc_review(*),
+      costing(*),
+      scf(*),
+      shipment_to_brand(*)
+    `);
+
+    if (brand_id) query = query.eq('styles.brand_id', brand_id);
+    if (season_id) query = query.eq('styles.season_id', season_id);
+
+    const { data, error } = await query;
     if (error) throw error;
-    const rows = data ?? [];
 
     if (format === 'csv') {
-      const headers = ['id', 'style_number', 'style_name', 'color', 'qty', 'season', 'brand', 'division', 'category', 'sample_type', 'coo', 'current_status', 'current_stage', 'created_at'];
-      const lines = [headers.map(escapeCsvCell).join(',')];
-      for (const r of rows) {
-        lines.push([
-          r.id,
-          r.style_number,
-          r.style_name ?? '',
-          r.color ?? '',
-          r.qty ?? '',
-          (r.seasons?.name ?? '') + (r.seasons?.year ? ` ${r.seasons.year}` : ''),
-          r.brands?.name ?? '',
-          r.divisions?.name ?? '',
-          r.product_categories?.name ?? '',
-          r.sample_types?.name ?? '',
-          r.coo ?? '',
-          r.current_status ?? '',
-          r.current_stage ?? '',
-          r.created_at ?? '',
-        ].map(escapeCsvCell).join(','));
-      }
+      const headers = [
+        'PBD', 'TD', 'FTY MD2', 'MD M88', 'Costing Team',
+        'Season/Brand', 'Style#/Name', 'Sample Type Group',
+        'Requested Lead Time', 'REQUESTED LEAD TIME to DEN',
+        'PSI Creation Work Week', 'PSI Turn Time (Days)', 'PSI Month', 'PSI Year', 'PSI Sent Status', 'PSI Discrepancy Status',
+        '1st PC Reject Status MD', 'TD to MD Comment Compare',
+        'SCF Month', 'SCF Year', 'SCF Performance',
+        'Target Xfactory Week', 'Estimate FTY Costing Due Date', 'FTY Costing Due Date', 'FTY Costing Due Week',
+        'CBD Month', 'CBD Year', 'FTY Costing Submit Performance',
+        'Estimate Xfactory for Sample due in Denver', 'Sample Due in Denver Status', 'AWB# Status',
+        'Sample Week Num', 'Sample Arrival WEEK', 'Sample Arrival Month', 'Sample Arrival Year',
+        'Factory Lead Time', 'FTY Sample Delivery Performance', 'Proto Efficiency',
+        'Costing Lead Time from FTY', 'Costing sent to brand status', 'Sample Sent to Brand Status',
+        'Sample to Brand Lead Time', 'KEY DATE'
+      ];
+
+      const rows = data.map(r => {
+        const team = r.team_assignment || {};
+        const style = r.styles || {};
+
+        // Calculated/Derived Logic
+        const requestedLeadTimeDen = r.kickoff_date && r.sample_due_denver ? dayDiff(r.kickoff_date, r.sample_due_denver) : '';
+        const psiTurnTime = r.kickoff_date && r.psi?.sent_date ? dayDiff(r.kickoff_date, r.psi.sent_date) : '';
+        const ftyLeadTime = r.psi?.sent_date && r.sample_development?.actual_send ? dayDiff(r.psi.sent_date, r.sample_development.actual_send) : '0';
+        const sampleToBrandLeadTime = r.psi?.sent_date && r.shipment_to_brand?.sent_date ? dayDiff(r.psi.sent_date, r.shipment_to_brand.sent_date) : '';
+        const costingPerf = r.costing?.fty_due_date && r.costing?.ng_entry_date ? classifyOnTime(r.costing.fty_due_date, r.costing.ng_entry_date) : 'Pending';
+
+        return [
+          team.pbd?.full_name ?? '',
+          team.td?.full_name ?? '',
+          team.fty_md2?.full_name ?? '',
+          team.md?.full_name ?? '',
+          team.costing?.full_name ?? '',
+          `${style.seasons?.code ?? ''} ${style.brands?.name ?? ''}`.trim(),
+          `${style.style_number ?? ''} ${style.style_name ?? ''}`.trim(),
+          r.sample_type_group ?? '',
+          r.requested_lead_time ?? '',
+          requestedLeadTimeDen,
+          r.psi?.work_week ?? '',
+          psiTurnTime,
+          r.psi?.month ?? '',
+          r.psi?.year ?? '',
+          r.psi?.sent_status ?? '',
+          r.psi?.disc_status ?? 'None',
+          r.pc_review?.reject_status ?? '',
+          r.pc_review?.td_md_compare ?? '',
+          r.scf?.month ?? '',
+          r.scf?.year ?? '',
+          r.scf?.performance ?? 'pending',
+          r.sample_development?.target_xfty_wk ?? '',
+          toISODate(r.costing?.est_due_date) ?? '',
+          toISODate(r.costing?.fty_due_date) ?? '',
+          r.costing?.due_week ?? '#N/A',
+          r.costing?.cbd_month ?? '',
+          r.costing?.cbd_year ?? '',
+          costingPerf,
+          toISODate(r.sample_development?.est_xfty) ?? '',
+          r.sample_development?.denver_status ?? '',
+          r.shipment_to_brand?.awb_status ?? '',
+          r.shipment_to_brand?.week_num ?? '#N/A',
+          r.shipment_to_brand?.arrival_week ?? '#N/A',
+          r.shipment_to_brand?.arrival_month ?? '',
+          r.shipment_to_brand?.arrival_year ?? '',
+          ftyLeadTime,
+          r.sample_development?.delivery_perf ?? 'In Process',
+          r.sample_development?.proto_eff ?? '',
+          r.costing?.cost_lead_time ?? '',
+          r.costing?.sent_status ?? 'pending',
+          r.shipment_to_brand?.sent_status ?? 'pending',
+          sampleToBrandLeadTime,
+          toISODate(r.key_date) ?? ''
+        ].map(val => `"${String(val).replace(/"/g, '""')}"`).join(',');
+      });
+
       res.setHeader('Content-Type', 'text/csv');
-      res.setHeader('Content-Disposition', 'attachment; filename="samples.csv"');
-      return res.send(lines.join('\n'));
+      res.setHeader('Content-Disposition', 'attachment; filename=samples.csv');
+      return res.send([headers.join(','), ...rows].join('\n'));
     }
-    return res.json(rows);
+
+    return res.json(data);
   } catch (err) {
     console.error('export samples:', err);
     return res.status(500).json({ error: err.message ?? 'Export failed' });
@@ -55,36 +124,33 @@ export const samples = async (req, res) => {
 
 export const pipeline = async (req, res) => {
   try {
-    const { data, error } = await supabase.from('samples').select('id, style_number, current_stage, current_status').order('created_at', { ascending: false }).limit(1000);
+    const { data, error } = await supabase
+      .from('sample_request')
+      .select('sample_id, kickoff_date, sample_due_denver, current_stage, current_status')
+      .order('created_at', { ascending: false })
+      .limit(1000);
+
     if (error) throw error;
-    return res.json(data ?? []);
+    return res.json(data);
   } catch (err) {
     console.error('export pipeline:', err);
-    return res.status(500).json({ error: err.message ?? 'Export failed' });
+    return res.status(500).json({ error: 'Pipeline export failed' });
   }
 };
 
 export const analytics = async (req, res) => {
   try {
-    const format = (req.query.format || 'json').toLowerCase();
-    const { data: sub } = await supabase.from('product_business_dev').select('sample_id, sample_due_denver, sample_sent_brand_date, samples(brands(name))');
-    const { data: ship } = await supabase.from('shipping_tracking').select('sample_id, estimated_arrival, actual_arrival, status, samples(brands(name))');
-    const payload = { submission: sub ?? [], delivery: ship ?? [], exported_at: new Date().toISOString() };
-    if (format === 'csv') {
-      const lines = ['type,sample_id,brand,due,actual,status'];
-      for (const r of sub ?? []) {
-        lines.push(['submission', r.sample_id, r.samples?.brands?.name ?? '', r.sample_due_denver ?? '', r.sample_sent_brand_date ?? '', ''].map(escapeCsvCell).join(','));
-      }
-      for (const r of ship ?? []) {
-        lines.push(['delivery', r.sample_id, r.samples?.brands?.name ?? '', r.estimated_arrival ?? '', r.actual_arrival ?? '', r.status ?? ''].map(escapeCsvCell).join(','));
-      }
-      res.setHeader('Content-Type', 'text/csv');
-      res.setHeader('Content-Disposition', 'attachment; filename="analytics.csv"');
-      return res.send(lines.join('\n'));
-    }
-    return res.json(payload);
+    const { data, error } = await supabase
+      .from('sample_request')
+      .select(`
+        sample_id, kickoff_date, sample_due_denver,
+        shipment:shipment_to_brand(sent_date, arrival_month, arrival_year)
+      `);
+
+    if (error) throw error;
+    return res.json(data);
   } catch (err) {
     console.error('export analytics:', err);
-    return res.status(500).json({ error: err.message ?? 'Export failed' });
+    return res.status(500).json({ error: 'Analytics export failed' });
   }
 };
