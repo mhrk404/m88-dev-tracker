@@ -269,21 +269,37 @@ export default function SampleStageEditPage() {
   function canAdvanceStage(): boolean {
     if (!currentStage) return false
     const fields = getStageFields(currentStage)
-    
-    // Get Finalize section fields
-    const finalizeFields = fields.filter(f => f.section === "Finalize")
-    if (finalizeFields.length === 0) return false
 
-    // Check all Finalize fields are filled
-    const allFinalizeFilled = finalizeFields.every((f) => {
+    const finalizeFields = fields.filter((f) => f.section === "Finalize")
+    if (finalizeFields.length > 0) {
+      const allFinalizeFilled = finalizeFields.every((f) => {
+        const value = formValues[f.key]
+        return value !== undefined && value !== null && String(value).trim() !== ""
+      })
+      const hasFinalizeCheck = finalizeFields.some((f) => f.key === "is_checked")
+      const isChecked = formValues["is_checked"] === "true"
+      return allFinalizeFilled && (!hasFinalizeCheck || isChecked)
+    }
+
+    const sentDate = formValues["sent_date"]
+    if (sentDate !== undefined && sentDate !== null && String(sentDate).trim() !== "") {
+      return true
+    }
+
+    return fields.some((f) => {
+      if (f.key === "is_checked") return false
       const value = formValues[f.key]
       return value !== undefined && value !== null && String(value).trim() !== ""
     })
+  }
 
-    // Check is_checked is true
-    const isChecked = formValues["is_checked"] === "true"
-
-    return allFinalizeFilled && isChecked
+  function getAdvanceRequirementMessage(): string {
+    if (!currentStage) return "Complete required fields to enable advancing."
+    const fields = getStageFields(currentStage)
+    const hasFinalize = fields.some((f) => f.section === "Finalize")
+    if (hasFinalize) return "Complete Finalize section and verify to enable advancing."
+    if (fields.some((f) => f.key === "sent_date")) return "Fill PSI Sent to FTY Date to enable advancing."
+    return "Complete required fields to enable advancing."
   }
 
   function confirmAndSave(moveToNext: boolean) {
@@ -291,7 +307,7 @@ export default function SampleStageEditPage() {
 
     // Validate Finalize section if trying to advance
     if (moveToNext && !canAdvanceStage()) {
-      toast.error("Cannot advance: Complete all Finalize section fields and verify the stage")
+      toast.error(`Cannot advance: ${getAdvanceRequirementMessage()}`)
       setShowConfirm(false)
       return
     }
@@ -347,8 +363,26 @@ export default function SampleStageEditPage() {
       setSaving(true)
       try {
         await updateStage(sampleId, stage, payload)
+
+        const sampleUpdatePayload: Record<string, unknown> = {}
+        if (stage === STAGES.PC_REVIEW) {
+          const reviewStatus = valueToString(payload["review_comp"]).trim()
+          const internalStatus = valueToString(payload["md_int_review"]).trim()
+          const resolvedStatus = reviewStatus || internalStatus
+          if (resolvedStatus) {
+            sampleUpdatePayload.current_status = resolvedStatus.toUpperCase()
+          }
+        }
+
         if (moveToNext && nextStage) {
-          await updateSample(sampleId, { current_stage: nextStage })
+          sampleUpdatePayload.current_stage = nextStage
+        }
+
+        if (Object.keys(sampleUpdatePayload).length > 0) {
+          await updateSample(sampleId, sampleUpdatePayload)
+        }
+
+        if (moveToNext && nextStage) {
           toast.success(`${stageLabel} saved — sample advanced to ${STAGE_LABELS[nextStage] ?? nextStage}`)
         } else {
           toast.success(`${stageLabel} stage saved`)
@@ -584,6 +618,24 @@ export default function SampleStageEditPage() {
                                 </SelectContent>
                               </Select>
                             )}
+                            {f.type === "select" && (
+                              <Select
+                                value={formValues[f.key] || "none"}
+                                onValueChange={(v) => setFormValues((prev) => ({ ...prev, [f.key]: v === "none" ? "" : v }))}
+                              >
+                                <SelectTrigger id={f.key} className="h-8">
+                                  <SelectValue placeholder="Select" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="none">—</SelectItem>
+                                  {(f.options ?? []).map((option) => (
+                                    <SelectItem key={option} value={option}>
+                                      {option}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            )}
                             {fieldErrors[f.key] && (
                               <p className="text-destructive text-xs">{fieldErrors[f.key]}</p>
                             )}
@@ -663,6 +715,24 @@ export default function SampleStageEditPage() {
                                   </SelectContent>
                                 </Select>
                               )}
+                              {f.type === "select" && (
+                                <Select
+                                  value={formValues[f.key] || "none"}
+                                  onValueChange={(v) => setFormValues((prev) => ({ ...prev, [f.key]: v === "none" ? "" : v }))}
+                                >
+                                  <SelectTrigger id={f.key} className="h-8">
+                                    <SelectValue placeholder="Select" />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="none">—</SelectItem>
+                                    {(f.options ?? []).map((option) => (
+                                      <SelectItem key={option} value={option}>
+                                        {option}
+                                      </SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                              )}
                               {fieldErrors[f.key] && (
                                 <p className="text-destructive text-xs">{fieldErrors[f.key]}</p>
                               )}
@@ -695,12 +765,12 @@ export default function SampleStageEditPage() {
               Update <span className="font-medium text-foreground">{currentStage ? (STAGE_LABELS[currentStage] ?? currentStage) : "stage"}</span> data? You have 7 seconds to undo.
               {currentStage && getNextStage(currentStage) && canAdvanceStage() && (
                 <div className="mt-2 text-sm text-foreground">
-                  You can advance to <span className="font-medium">{STAGE_LABELS[getNextStage(currentStage)!] ?? getNextStage(currentStage)}</span> (Finalize section is complete).
+                  You can advance to <span className="font-medium">{STAGE_LABELS[getNextStage(currentStage)!] ?? getNextStage(currentStage)}</span>.
                 </div>
               )}
               {currentStage && getNextStage(currentStage) && !canAdvanceStage() && (
                 <div className="mt-2 text-sm text-muted-foreground">
-                  Complete Finalize section and verify to enable advancing.
+                  {getAdvanceRequirementMessage()}
                 </div>
               )}
             </AlertDialogDescription>

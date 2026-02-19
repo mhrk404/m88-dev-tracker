@@ -7,7 +7,7 @@
 --
 -- Stage              PBD    TD     FTY    MD     COSTING  BRAND  ADMIN
 -- ──────────────     ────── ────── ────── ────── ───────  ─────  ─────
--- PSI                RW     R      R      R      R        R      RWA
+-- PSI                R      RW     R      R      R        R      RWA
 -- SAMPLE_DEVELOPMENT R      RW     RW     R      R        R      RWA
 -- PC_REVIEW          R      RW     R      RW     R        R      RWA
 -- COSTING            RW     R      R      R      RW       R      RWA
@@ -35,15 +35,15 @@ INSERT INTO role_permission (role, stage, can_read, can_write, can_approve) VALU
   ('BRAND', 'SCF',                true,  false, false),
   ('BRAND', 'SHIPMENT_TO_BRAND',  true,  false, false),
 
-  -- PBD: write PSI + COSTING + SHIPMENT_TO_BRAND; read rest
-  ('PBD',   'PSI',                true,  true,  false),
+  -- PBD: write COSTING + SHIPMENT_TO_BRAND; read rest
+  ('PBD',   'PSI',                true,  false, false),
   ('PBD',   'SAMPLE_DEVELOPMENT', true,  false, false),
   ('PBD',   'PC_REVIEW',          true,  false, false),
   ('PBD',   'COSTING',            true,  true,  false),
   ('PBD',   'SCF',                true,  false, false),
   ('PBD',   'SHIPMENT_TO_BRAND',  true,  true,  false),
 
-  -- TD: write SAMPLE_DEVELOPMENT + PC_REVIEW + PSI (fill PSI after PBD initiates); read rest
+  -- TD: write PSI + SAMPLE_DEVELOPMENT + PC_REVIEW; read rest
   ('TD',    'PSI',                true,  true,  false),
   ('TD',    'SAMPLE_DEVELOPMENT', true,  true,  false),
   ('TD',    'PC_REVIEW',          true,  true,  false),

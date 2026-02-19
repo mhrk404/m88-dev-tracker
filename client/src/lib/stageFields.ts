@@ -1,7 +1,7 @@
 import type { StageName } from "./constants"
 import { STAGES } from "./constants"
 
-export type StageFieldType = "text" | "date" | "number" | "boolean"
+export type StageFieldType = "text" | "date" | "number" | "boolean" | "select"
 
 export interface StageFieldConfig {
   key: string
@@ -9,18 +9,14 @@ export interface StageFieldConfig {
   type: StageFieldType
   optional?: boolean
   section?: string
+  options?: string[]
 }
 
 const SKIP_KEYS = new Set(["id", "sample_id", "created_at", "updated_at", "modified_by_log"])
 
 export const STAGE_FIELDS: Record<StageName, StageFieldConfig[]> = {
   [STAGES.PSI]: [
-    { key: "sent_date", label: "Sent date", type: "date", optional: true },
-    { key: "work_week", label: "Work week", type: "text", optional: true },
-    { key: "turn_time", label: "Turn time", type: "text", optional: true },
-    { key: "sent_status", label: "Sent status", type: "text", optional: true },
-    { key: "disc_status", label: "Disc status", type: "text", optional: true },
-    { key: "btp_disc", label: "BTP Disc", type: "text", optional: true },
+    { key: "sent_date", label: "PSI Sent to FTY Date", type: "date", optional: true },
     { key: "is_checked", label: "Stage Checked / Verified", type: "boolean", optional: true },
   ],
   [STAGES.SAMPLE_DEVELOPMENT]: [
@@ -42,15 +38,29 @@ export const STAGE_FIELDS: Record<StageName, StageFieldConfig[]> = {
     { key: "is_checked", label: "Stage Checked / Verified", type: "boolean", optional: true, section: "Finalize" },
   ],
   [STAGES.PC_REVIEW]: [
-    { key: "target_1pc", label: "Target 1PC", type: "date", optional: true },
-    { key: "awb_inbound", label: "AWB Inbound", type: "text", optional: true },
-    { key: "cbd_actual", label: "CBD Actual", type: "date", optional: true },
-    { key: "confirm_date", label: "Confirm date", type: "date", optional: true },
-    { key: "reject_by_md", label: "Reject by MD", type: "text", optional: true },
-    { key: "review_comp", label: "Review comp", type: "text", optional: true },
-    { key: "md_int_review", label: "MD Int review", type: "text", optional: true },
-    { key: "td_md_compare", label: "TD MD compare", type: "text", optional: true },
-    { key: "is_checked", label: "Stage Checked / Verified", type: "boolean", optional: true },
+    { key: "confirm_date", label: "1st PC Review Date Confirmed", type: "date", optional: true },
+    {
+      key: "reject_by_md",
+      label: "1st PC Reject by MD",
+      type: "select",
+      optional: true,
+      options: ["0.0", "1.0", "2.0", "3.0", "Completed"],
+    },
+    {
+      key: "review_comp",
+      label: "1st PC Review Status",
+      type: "select",
+      optional: true,
+      options: ["Completed", "Pending", "Declined"],
+    },
+    {
+      key: "md_int_review",
+      label: "M88 MD Internal Review Status",
+      type: "select",
+      optional: true,
+      options: ["Okay", "Conditionally Okay", "Dropped", "Rejected"],
+    },
+    { key: "scf_shared_date", label: "SCF Shared Date", type: "date", optional: true },
   ],
   [STAGES.COSTING]: [
     { key: "est_due_date", label: "Est due date", type: "date", optional: true },
@@ -95,7 +105,7 @@ export function stagePayloadFromForm(
       if (f.type === "number" && v !== "") out[f.key] = Number(v)
       else if (f.type === "boolean") out[f.key] = Boolean(v)
       else if (f.type === "date" && v) out[f.key] = v
-      else if (f.type === "text") out[f.key] = v == null ? "" : String(v)
+      else if (f.type === "text" || f.type === "select") out[f.key] = v == null ? "" : String(v)
       else out[f.key] = v
     }
   }
