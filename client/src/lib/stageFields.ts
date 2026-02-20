@@ -15,6 +15,7 @@ export interface StageFieldConfig {
 const SKIP_KEYS = new Set(["id", "sample_id", "created_at", "updated_at", "modified_by_log"])
 
 export const STAGE_FIELDS: Record<StageName, StageFieldConfig[]> = {
+  // PSI
   [STAGES.PSI]: [
     { key: "sent_date", label: "PSI Sent to FTY Date", type: "date", optional: true },
     { key: "is_checked", label: "Stage Checked / Verified", type: "boolean", optional: true },
@@ -63,19 +64,18 @@ export const STAGE_FIELDS: Record<StageName, StageFieldConfig[]> = {
     { key: "scf_shared_date", label: "SCF Shared Date", type: "date", optional: true },
   ],
   [STAGES.COSTING]: [
-    { key: "est_due_date", label: "Est due date", type: "date", optional: true },
-    { key: "fty_due_date", label: "FTY due date", type: "date", optional: true },
-    { key: "due_week", label: "Due week", type: "text", optional: true },
-    { key: "team_member", label: "Team member", type: "text", optional: true },
-    { key: "ng_entry_date", label: "NG entry date", type: "date", optional: true },
-    { key: "ownership", label: "Ownership", type: "text", optional: true },
-    { key: "sent_to_brand", label: "Sent to brand", type: "text", optional: true },
-    { key: "sent_status", label: "Sent status", type: "text", optional: true },
-    { key: "is_checked", label: "Stage Checked / Verified", type: "boolean", optional: true },
+    {
+      key: "sent_status",
+      label: "Costing Sent to Brand Status",
+      type: "select",
+      optional: true,
+      options: ["Pending", "Sent"],
+    },
+    { key: "cost_sheet_date", label: "Cost Sheet Entered Date", type: "date", optional: true },
   ],
+  // Sample Confirmation Form (SCF)
   [STAGES.SCF]: [
-    { key: "shared_date", label: "Shared date", type: "date", optional: true },
-    { key: "performance", label: "Performance", type: "text", optional: true },
+    { key: "shared_date", label: "Sample Confirmation Form Date", type: "date", optional: true },
     { key: "pkg_eta_denver", label: "PKG ETA Denver", type: "date", optional: true },
     { key: "is_checked", label: "Stage Checked / Verified", type: "boolean", optional: true },
   ],

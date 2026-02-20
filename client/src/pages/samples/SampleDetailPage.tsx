@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react"
-import { useParams, useNavigate } from "react-router-dom"
-import { ArrowLeft, Edit, ChevronDown, FileEdit } from "lucide-react"
+import { useParams, useNavigate, Link } from "react-router-dom"
+import { Edit, ChevronDown, FileEdit } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -10,8 +10,15 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
-import { Loading } from "@/components/ui/loading"
-import PageBreadcrumbs from "@/components/layout/PageBreadcrumbs"
+import { DetailSkeleton } from "@/components/ui/skeletons"
+import {
+  Breadcrumb,
+  BreadcrumbItem,
+  BreadcrumbLink,
+  BreadcrumbList,
+  BreadcrumbPage,
+  BreadcrumbSeparator,
+} from "@/components/ui/breadcrumb"
 import { STAGES } from "@/lib/constants"
 import { getSampleFull } from "@/api/samples"
 import type { SampleFull, StageData } from "@/types/sample"
@@ -55,9 +62,10 @@ const STAGE_FIELD_LABELS: Record<string, string> = {
   estimated_arrival: "Estimated arrival",
   actual_arrival: "Actual arrival",
   fty_md2: "FTY MD2",
-  fty_costing_due_date: "FTY costing due date",
   td_to_md_comment: "TD to MD comment",
   modified_by_log: "Modified by (log)",
+  sent_status: "Costing Sent to Brand Status",
+  cost_sheet_date: "Cost Sheet Entered Date",
 }
 
 function formatStageFieldLabel(key: string): string {
@@ -73,6 +81,13 @@ function formatStageFieldValue(key: string, value: unknown): string {
     return new Date(value).toLocaleDateString(undefined, { dateStyle: "medium" })
   }
   return String(value)
+}
+
+function hasStageFieldValue(value: unknown): boolean {
+  if (value == null) return false
+  if (typeof value === "string") return value.trim().length > 0
+  if (Array.isArray(value)) return value.length > 0
+  return true
 }
 
 function currentStageIndex(stage: string | null | undefined): number {
@@ -120,7 +135,11 @@ export default function SampleDetailPage() {
       user.roleCode === "SUPER_ADMIN")
 
   if (loading) {
-    return <Loading fullScreen text="Loading sample..." />
+    return (
+      <div className="p-6">
+        <DetailSkeleton />
+      </div>
+    )
   }
 
   if (!sample) {
@@ -161,32 +180,51 @@ export default function SampleDetailPage() {
   }
 
   return (
-    <div className="space-y-2 p-3 md:p-4">
-      <PageBreadcrumbs />
-      <div className="flex items-center justify-between mb-2">
-        <div className="flex items-center gap-2">
-          <Button variant="ghost" size="icon" onClick={() => navigate("/samples")}> 
-            <ArrowLeft className="h-4 w-4" />
-          </Button>
-          <h1 className="text-xl font-bold">{sample.style_number}</h1>
-        </div>
-        <div className="flex items-center gap-1">
-          {canEditStage && (
-            <Button
-              variant="outline"
-              onClick={() => navigate(`/samples/${id}/stage-edit`)}
-              size="sm"
+    <div className="space-y-3 p-3 md:p-4">
+      <div className="space-y-3">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <Link
+              to="/samples"
+              className="inline-flex h-11 w-11 items-center justify-center rounded-full bg-muted text-lg font-black leading-none text-foreground hover:bg-accent"
             >
-              <FileEdit className="h-4 w-4 mr-2" />
-              Edit stage
-            </Button>
-          )}
-          {canEdit && (
-            <Button variant="outline" onClick={() => navigate(`/samples/${id}/edit`)} size="sm">
-              <Edit className="h-4 w-4 mr-2" />
-              Edit
-            </Button>
-          )}
+              &larr;
+            </Link>
+            <Breadcrumb>
+              <BreadcrumbList>
+                <BreadcrumbItem>
+                  <BreadcrumbLink asChild>
+                    <Link to="/samples">Samples</Link>
+                  </BreadcrumbLink>
+                </BreadcrumbItem>
+                <BreadcrumbSeparator />
+                <BreadcrumbItem>
+                  <BreadcrumbPage>Details</BreadcrumbPage>
+                </BreadcrumbItem>
+              </BreadcrumbList>
+            </Breadcrumb>
+          </div>
+          <div className="flex items-center gap-1">
+            {canEditStage && (
+              <Button
+                variant="outline"
+                onClick={() => navigate(`/samples/${id}/stage-edit`)}
+                size="sm"
+              >
+                <FileEdit className="h-4 w-4 mr-2" />
+                Edit stage
+              </Button>
+            )}
+            {canEdit && (
+              <Button variant="outline" onClick={() => navigate(`/samples/${id}/edit`)} size="sm">
+                <Edit className="h-4 w-4 mr-2" />
+                Edit
+              </Button>
+            )}
+          </div>
+        </div>
+        <div>
+          <h1 className="text-xl font-bold">{sample.style_number}</h1>
         </div>
       </div>
 
@@ -201,8 +239,9 @@ export default function SampleDetailPage() {
             const isCurrent = idx === effectiveStageIdx
             const statusLabel = isCompleted ? "Completed" : isCurrent ? "Current" : "Not started"
             const skipKeys = new Set(["id", "sample_id", "created_at", "updated_at"])
+            const isIdKey = (key: string) => key === "id" || key.endsWith("_id")
             const entries = stageData
-              ? Object.entries(stageData).filter(([k]) => !skipKeys.has(k))
+              ? Object.entries(stageData).filter(([k, v]) => !skipKeys.has(k) && !isIdKey(k) && hasStageFieldValue(v))
               : []
             return (
               <>

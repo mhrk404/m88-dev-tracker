@@ -2,39 +2,43 @@
 
 Base URL: `/api` (e.g. `http://localhost:5000/api`).
 
-**Roles:** `ADMIN` | `PBD` | `TD` | `FTY` | `MD` | `COSTING` | `BRAND`
+**Roles:** `SUPER_ADMIN` | `ADMIN` | `PBD` | `TD` | `FTY` | `MD` | `COSTING` | `BRAND`
 
 ---
 
 ## Role Definitions & Permissions
 
-### 1. ADMIN
+### 1. SUPER_ADMIN
+*   **Access**: Full system access across all modules and stages.
+*   **Capabilities**: Same as Admin, plus unrestricted role-management access.
+
+### 2. ADMIN
 *   **Access**: Full system access.
 *   **Capabilities**: User management, brand/season CRUD, style CRUD, sample CRUD, any stage update, analytics, export.
 
-### 2. PBD (Product Business Development)
+### 3. PBD (Product Business Development)
 *   **Definition**: Internal Owner / PD.
 *   **Sample Control**: Can create samples and update basic sample info.
 *   **Stage Control**: Writes to **PSI**, **COSTING**, and **SHIPMENT_TO_BRAND**.
 *   **Data Scope**: Sees all samples.
 
-### 3. TD (Technical Design)
+### 4. TD (Technical Design)
 *   **Stage Control**: Writes to **SAMPLE_DEVELOPMENT** and **PC_REVIEW**.
 *   **Data Scope**: Sees all samples.
 
-### 4. FTY (Factory Execution)
+### 5. FTY (Factory Execution)
 *   **Stage Control**: Writes to **SAMPLE_DEVELOPMENT** (Actual Send), **COSTING** (Submit), and **SCF**.
 *   **Data Scope**: Sees only samples where they are assigned in `team_assignment`.
 
-### 5. MD (Merchandising)
+### 6. MD (Merchandising)
 *   **Stage Control**: Writes to **PC_REVIEW** (MD Internal Review).
 *   **Data Scope**: Sees all samples.
 
-### 6. COSTING (Costing Analysis)
+### 7. COSTING (Costing Analysis)
 *   **Stage Control**: Writes to **COSTING**.
 *   **Data Scope**: Sees all samples.
 
-### 7. BRAND
+### 8. BRAND
 *   **Access**: Read-only access to samples they own.
 *   **Data Scope**: Sees only samples where their brand is assigned to the style.
 

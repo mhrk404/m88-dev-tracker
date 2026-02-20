@@ -44,6 +44,9 @@ export const updateStage = async (req, res) => {
     if (!sampleExists) return res.status(404).json({ error: 'Sample not found' });
 
     const { stage, sample_id: _bodySampleId, ...payload } = req.body;
+    console.log('[DEBUG] updateStage - stage:', stage);
+    console.log('[DEBUG] updateStage - payload:', JSON.stringify(payload, null, 2));
+    
     if (!stage || !STAGE_TABLES.includes(stage)) {
       return res.status(400).json({ error: 'body.stage is required and must be one of: ' + STAGE_TABLES.join(', ') });
     }
@@ -62,13 +65,17 @@ export const updateStage = async (req, res) => {
 
     let data;
     if (existing) {
+      console.log('[DEBUG] Updating existing record with payload:', JSON.stringify(payload, null, 2));
       const { data: updated, error } = await supabase.from(table).update(payload).eq('sample_id', sampleId).select('*').single();
       if (error) throw error;
       data = updated;
+      console.log('[DEBUG] Updated record:', JSON.stringify(updated, null, 2));
     } else {
+      console.log('[DEBUG] Inserting new record with payload:', JSON.stringify({ sample_id: sampleId, ...payload }, null, 2));
       const { data: inserted, error } = await supabase.from(table).insert({ sample_id: sampleId, ...payload }).select('*').single();
       if (error) throw error;
       data = inserted;
+      console.log('[DEBUG] Inserted record:', JSON.stringify(inserted, null, 2));
     }
 
     try {

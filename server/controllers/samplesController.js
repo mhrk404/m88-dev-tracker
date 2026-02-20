@@ -300,7 +300,7 @@ export const create = async (req, res) => {
       unfree_status: unfree_status?.trim() || null,
       sample_type: sample_type?.trim() || null,
       sample_type_group: sample_type_group?.trim() || null,
-      sample_status: sample_status?.trim() || null,
+      sample_status: 'Initiated',
       kickoff_date: kickoff_date || null,
       sample_due_denver: sample_due_denver || null,
       requested_lead_time: (computedLead != null) ? Number(computedLead) : (requested_lead_time != null ? Number(requested_lead_time) : null),
@@ -350,7 +350,7 @@ export const create = async (req, res) => {
 
     const { ip, userAgent } = auditMeta(req);
     await logAudit({ userId: req.user?.id, action: 'create', resource: 'sample', resourceId: sampleId, details: { sample_id: sampleId }, ip, userAgent });
-    await recordHistory(sampleId, 'sample_request', 'create', null, sample_status || '', createdBy, 'Sample created');
+    await recordHistory(sampleId, 'sample_request', 'create', null, 'Initiated', createdBy, 'Sample created');
 
     return res.status(201).json(flattenSample(dataFull));
   } catch (err) {
@@ -418,6 +418,17 @@ export const update = async (req, res) => {
 
     const { data: oldRow } = await supabase.from('sample_request').select('*').eq('sample_id', sampleId).maybeSingle();
     if (!oldRow) return res.status(404).json({ error: 'Sample not found' });
+
+    const oldStage = typeof oldRow.current_stage === 'string'
+      ? oldRow.current_stage.trim().toLowerCase()
+      : oldRow.current_stage;
+    const nextStage = typeof updates.current_stage === 'string'
+      ? updates.current_stage.trim().toLowerCase()
+      : updates.current_stage;
+
+    if (nextStage && nextStage !== oldStage) {
+      updates.sample_status = 'In Progress';
+    }
 
     // If kickoff_date/sample_due_denver are present (either in updates or existing), compute requested_lead_time on server
     function computeLeadTimeWeeks(kickoff, due) {

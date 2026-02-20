@@ -1,11 +1,18 @@
 import { useState, useEffect } from "react"
-import { useParams, useNavigate } from "react-router-dom"
-import { ArrowLeft, Save } from "lucide-react"
+import { useParams, useNavigate, Link } from "react-router-dom"
+import { Save } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Loading } from "@/components/ui/loading"
-import PageBreadcrumbs from "@/components/layout/PageBreadcrumbs"
+import { FormSkeleton } from "@/components/ui/skeletons"
+import {
+  Breadcrumb,
+  BreadcrumbItem,
+  BreadcrumbLink,
+  BreadcrumbList,
+  BreadcrumbPage,
+  BreadcrumbSeparator,
+} from "@/components/ui/breadcrumb"
 import {
   Select,
   SelectContent,
@@ -265,7 +272,11 @@ export default function SampleEditPage() {
   }
 
   if (!sample || !lookups) {
-    return <Loading fullScreen text="Loading..." />
+    return (
+      <div className="p-6">
+        <FormSkeleton />
+      </div>
+    )
   }
 
   if (!user || !canEditSample(user.roleCode as RoleCode)) {
@@ -282,13 +293,40 @@ export default function SampleEditPage() {
 
   return (
     <div className="space-y-4 p-6">
-      <PageBreadcrumbs />
-      <div className="flex items-center gap-3">
-        <Button variant="ghost" size="icon" onClick={() => navigate(`/samples/${id}`)}>
-          <ArrowLeft className="h-4 w-4" />
-        </Button>
-        <h1 className="text-2xl font-bold">Edit Sample</h1>
-        <span className="text-muted-foreground">({sample.style_number})</span>
+      <div className="space-y-3">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <Link
+              to={id ? `/samples/${id}` : "/samples"}
+              className="inline-flex h-11 w-11 items-center justify-center rounded-full bg-muted text-lg font-black leading-none text-foreground hover:bg-accent"
+            >
+              &larr;
+            </Link>
+            <Breadcrumb>
+              <BreadcrumbList>
+                <BreadcrumbItem>
+                  <BreadcrumbLink asChild>
+                    <Link to="/samples">Samples</Link>
+                  </BreadcrumbLink>
+                </BreadcrumbItem>
+                <BreadcrumbSeparator />
+                <BreadcrumbItem>
+                  <BreadcrumbLink asChild>
+                    <Link to={id ? `/samples/${id}` : "/samples"}>Details</Link>
+                  </BreadcrumbLink>
+                </BreadcrumbItem>
+                <BreadcrumbSeparator />
+                <BreadcrumbItem>
+                  <BreadcrumbPage>Edit</BreadcrumbPage>
+                </BreadcrumbItem>
+              </BreadcrumbList>
+            </Breadcrumb>
+          </div>
+        </div>
+        <div>
+          <h1 className="text-2xl font-bold">Edit Sample</h1>
+          <p className="text-sm text-muted-foreground">{sample.style_number}</p>
+        </div>
       </div>
 
       <form onSubmit={handleSubmit}>

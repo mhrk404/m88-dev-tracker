@@ -1,6 +1,6 @@
 import { useEffect, useState, useCallback } from "react"
-import { useParams, useNavigate } from "react-router-dom"
-import { ArrowLeft, ChevronDown, Check } from "lucide-react"
+import { useParams, useNavigate, Link } from "react-router-dom"
+import { ChevronDown, Check } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -28,8 +28,15 @@ import {
   AlertDialogCancel,
   AlertDialogAction,
 } from "@/components/ui/alert-dialog"
-import { Loading } from "@/components/ui/loading"
-import PageBreadcrumbs from "@/components/layout/PageBreadcrumbs"
+import {
+  Breadcrumb,
+  BreadcrumbItem,
+  BreadcrumbLink,
+  BreadcrumbList,
+  BreadcrumbPage,
+  BreadcrumbSeparator,
+} from "@/components/ui/breadcrumb"
+import { FormSkeleton } from "@/components/ui/skeletons"
 import { STAGES } from "@/lib/constants"
 import { stageForRole } from "@/lib/rbac"
 import { getStageFields, stagePayloadFromForm, type StageFieldConfig } from "@/lib/stageFields"
@@ -103,7 +110,7 @@ export default function SampleStageEditPage() {
   const [fieldErrors, setFieldErrors] = useState<Record<string, string>>({})
 
   const userStage = user ? stageForRole(user.roleCode as RoleCode) : null
-  const isAdmin = user?.roleCode === "ADMIN"
+  const isAdmin = user?.roleCode === "ADMIN" || user?.roleCode === "SUPER_ADMIN"
   const defaultStage: StageName | null = userStage ?? (isAdmin ? STAGES.PSI : null)
 
   const [selectedStage, setSelectedStage] = useState<StageName | null>(defaultStage)
@@ -362,6 +369,9 @@ export default function SampleStageEditPage() {
       toast.dismiss(toastId)
       setSaving(true)
       try {
+        console.log('[DEBUG] Saving stage:', stage)
+        console.log('[DEBUG] Form values:', formValues)
+        console.log('[DEBUG] Payload to send:', payload)
         await updateStage(sampleId, stage, payload)
 
         const sampleUpdatePayload: Record<string, unknown> = {}
@@ -376,14 +386,6 @@ export default function SampleStageEditPage() {
 
         if (moveToNext && nextStage) {
           sampleUpdatePayload.current_stage = nextStage
-          if (!sampleUpdatePayload.current_status) {
-            sampleUpdatePayload.current_status = String(nextStage).toUpperCase()
-          }
-        } else if (!sampleUpdatePayload.current_status) {
-          const existingStatus = sample?.current_status?.toUpperCase() ?? ""
-          if (!existingStatus || existingStatus === "INITIATED") {
-            sampleUpdatePayload.current_status = String(stage).toUpperCase()
-          }
         }
 
         if (Object.keys(sampleUpdatePayload).length > 0) {
@@ -429,7 +431,11 @@ export default function SampleStageEditPage() {
   }
 
   if (loading && !sample) {
-    return <Loading fullScreen text="Loading..." />
+    return (
+      <div className="p-6">
+        <FormSkeleton />
+      </div>
+    )
   }
 
   if (!id || !sample) {
@@ -472,21 +478,44 @@ export default function SampleStageEditPage() {
 
   return (
     <div className="space-y-3 p-3 md:p-4">
-      <PageBreadcrumbs />
-      <div className="flex items-center justify-between mb-1">
-        <div className="flex items-center gap-2">
-          <Button variant="ghost" size="icon" onClick={() => navigate(`/samples/${id}`)}>
-            <ArrowLeft className="h-4 w-4" />
-          </Button>
-          <div>
-            <h1 className="text-xl font-bold">Edit Stage</h1>
-            <p className="text-xs text-muted-foreground">
-              {sample.style_number}
-              {sample.style_name ? ` • ${sample.style_name}` : ""}
-            </p>
+      <div className="space-y-3">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <Link
+              to={id ? `/samples/${id}` : "/samples"}
+              className="inline-flex h-11 w-11 items-center justify-center rounded-full bg-muted text-lg font-black leading-none text-foreground hover:bg-accent"
+            >
+              &larr;
+            </Link>
+            <Breadcrumb>
+              <BreadcrumbList>
+                <BreadcrumbItem>
+                  <BreadcrumbLink asChild>
+                    <Link to="/samples">Samples</Link>
+                  </BreadcrumbLink>
+                </BreadcrumbItem>
+                <BreadcrumbSeparator />
+                <BreadcrumbItem>
+                  <BreadcrumbLink asChild>
+                    <Link to={id ? `/samples/${id}` : "/samples"}>Details</Link>
+                  </BreadcrumbLink>
+                </BreadcrumbItem>
+                <BreadcrumbSeparator />
+                <BreadcrumbItem>
+                  <BreadcrumbPage>Edit Stage</BreadcrumbPage>
+                </BreadcrumbItem>
+              </BreadcrumbList>
+            </Breadcrumb>
           </div>
         </div>
-      </div>
+        <div>
+          <h1 className="text-xl font-bold">Edit Stage</h1>
+          <p className="text-xs text-muted-foreground">
+            {sample.style_number}
+            {sample.style_name ? ` • ${sample.style_name}` : ""}
+          </p>
+        </div>
+          </div>
 
       <Card className={`border-l-4 ${getStatusCardStyle()}`}>
         <CardContent className="pt-4">

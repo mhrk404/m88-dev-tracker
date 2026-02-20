@@ -5,7 +5,7 @@ import { toast } from "sonner"
 import { cn } from "@/lib/utils"
 
 import PageBreadcrumbs from "@/components/layout/PageBreadcrumbs"
-import { Loading } from "@/components/ui/loading"
+import { TableSkeleton } from "@/components/ui/skeletons"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -67,6 +67,10 @@ import type { CreateUserInput, UpdateUserInput, User } from "@/types/user"
 type ActiveFilter = "all" | "active" | "inactive"
 const USERS_PAGE_SIZE = 10
 
+function isAdministrativeRole(roleCode?: string | null) {
+  return roleCode === ROLES.ADMIN || roleCode === ROLES.SUPER_ADMIN
+}
+
 function emptyCreate(): CreateUserInput {
   return {
     username: "",
@@ -100,6 +104,7 @@ export default function UsersPage() {
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
   const [generatedPassword, setGeneratedPassword] = useState<string>("")
   const [copiedPassword, setCopiedPassword] = useState(false)
+  const [deleting, setDeleting] = useState(false)
 
   function generatePassword(username: string): string {
     if (!username.trim()) return ""
@@ -259,7 +264,7 @@ export default function UsersPage() {
   }
 
   function openDelete(u: User) {
-    if (u.roleCode === ROLES.ADMIN) {
+    if (isAdministrativeRole(u.roleCode)) {
       toast.error("Cannot delete administrative users")
       return
     }
@@ -267,55 +272,96 @@ export default function UsersPage() {
     setDeleteOpen(true)
   }
 
+  function scheduleUserDeleteWithUndo(ids: number[], successMessage: string, clearAllSelection = false) {
+    if (ids.length === 0) return
+
+    const DELAY = 5
+    let remaining = DELAY
+    let cancelled = false
+
+    setDeleteOpen(false)
+    setBulkDeleteOpen(false)
+    setUserToDelete(null)
+
+    let intervalId: ReturnType<typeof setInterval>
+    let timeoutId: ReturnType<typeof setTimeout>
+
+    function cancel() {
+      cancelled = true
+      clearInterval(intervalId)
+      clearTimeout(timeoutId)
+      toast.dismiss(toastId)
+      toast.info("Delete cancelled")
+    }
+
+    const toastId = toast.loading(`Deleting in ${remaining}s — click Undo to cancel`, {
+      action: { label: "Undo", onClick: cancel },
+      duration: Infinity,
+    })
+
+    intervalId = setInterval(() => {
+      remaining--
+      if (remaining > 0) {
+        toast.loading(`Deleting in ${remaining}s — click Undo to cancel`, {
+          id: toastId,
+          action: { label: "Undo", onClick: cancel },
+          duration: Infinity,
+        })
+      }
+    }, 1000)
+
+    timeoutId = setTimeout(async () => {
+      clearInterval(intervalId)
+      if (cancelled) return
+      toast.dismiss(toastId)
+
+      setDeleting(true)
+      try {
+        await Promise.all(ids.map((id) => deleteUser(id)))
+        toast.success(successMessage)
+        if (clearAllSelection) {
+          setSelectedIds(new Set())
+        } else {
+          setSelectedIds((prev) => {
+            const next = new Set(prev)
+            ids.forEach((id) => next.delete(id))
+            return next
+          })
+        }
+        await refresh()
+      } catch (err: any) {
+        console.error("Delete user failed:", err)
+        toast.error(err?.response?.data?.error || "Failed to delete user(s)")
+      } finally {
+        setDeleting(false)
+      }
+    }, DELAY * 1000)
+  }
+
   async function onDelete() {
     if (!userToDelete) return
-    try {
-      await deleteUser(userToDelete.id)
-      toast.success("User deleted")
-      setDeleteOpen(false)
-      setUserToDelete(null)
-      setSelectedIds((prev) => {
-        const next = new Set(prev)
-        next.delete(userToDelete.id)
-        return next
-      })
-      await refresh()
-    } catch (err: any) {
-      console.error("Delete user failed:", err)
-      toast.error(err?.response?.data?.error || "Failed to delete user")
-    }
+    scheduleUserDeleteWithUndo([userToDelete.id], "User deleted")
   }
 
   async function onBulkDelete() {
     if (selectedIds.size === 0) return
-    try {
-      const usersToDelete = Array.from(selectedIds).filter((id) => {
-        const user = users.find((u) => u.id === id)
-        return user && user.roleCode !== ROLES.ADMIN
-      })
+    const usersToDelete = Array.from(selectedIds).filter((id) => {
+      const user = users.find((u) => u.id === id)
+      return user && !isAdministrativeRole(user.roleCode)
+    })
 
-      if (usersToDelete.length === 0) {
-        toast.error("Cannot delete administrative users")
-        return
-      }
-
-      const skippedCount = selectedIds.size - usersToDelete.length
-
-      await Promise.all(usersToDelete.map((id) => deleteUser(id)))
-
-      let message = `${usersToDelete.length} user(s) deleted`
-      if (skippedCount > 0) {
-        message += ` (${skippedCount} administrative user(s) cannot be deleted)`
-      }
-
-      toast.success(message)
-      setBulkDeleteOpen(false)
-      setSelectedIds(new Set())
-      await refresh()
-    } catch (err: any) {
-      console.error("Bulk delete failed:", err)
-      toast.error(err?.response?.data?.error || "Failed to delete users")
+    if (usersToDelete.length === 0) {
+      toast.error("Cannot delete administrative users")
+      return
     }
+
+    const skippedCount = selectedIds.size - usersToDelete.length
+    let message = `${usersToDelete.length} user(s) deleted`
+    if (skippedCount > 0) {
+      message += ` (${skippedCount} administrative user(s) cannot be deleted)`
+    }
+
+    scheduleUserDeleteWithUndo(usersToDelete, message, true)
   }
 
   const toggleSelectUser = (id: number) => {
@@ -338,11 +384,15 @@ export default function UsersPage() {
     }
   }
 
-  if (loading) return <Loading fullScreen text="Loading users..." />
+  if (loading) return (
+    <div className="p-6">
+      <TableSkeleton />
+    </div>
+  )
 
   return (
     <RoleGate
-      allowedRoles={[ROLES.ADMIN]}
+      allowedRoles={[ROLES.ADMIN, ROLES.SUPER_ADMIN]}
       fallback={
         <div className="p-6">
           <div className="text-sm text-muted-foreground">You don’t have access to manage users.</div>
@@ -350,13 +400,7 @@ export default function UsersPage() {
       }
     >
       <div className="space-y-6 p-6">
-        <PageBreadcrumbs />
-
         <Card className="border-0 -mx-6 px-6">
-          <CardHeader className="px-0">
-            <CardTitle>Filters</CardTitle>
-            <CardDescription>Search and filter users.</CardDescription>
-          </CardHeader>
           <CardContent className="space-y-4 px-0">
             <div className="flex gap-4 flex-wrap">
               <div className="flex-1 min-w-[240px]">
@@ -413,6 +457,7 @@ export default function UsersPage() {
                     variant="outline"
                     size="sm"
                     onClick={() => setBulkDeleteOpen(true)}
+                    disabled={deleting}
                     className="border-destructive/50 text-destructive hover:bg-destructive/10"
                   >
                     <Trash2 className="h-4 w-4 mr-2" />
@@ -503,7 +548,7 @@ export default function UsersPage() {
                               variant="ghost"
                               size="icon-xs"
                               onClick={() => openDelete(u)}
-                              disabled={u.roleCode === ROLES.ADMIN}
+                              disabled={isAdministrativeRole(u.roleCode)}
                             >
                               <Trash2 className="h-4 w-4 text-destructive" />
                             </Button>
@@ -747,8 +792,8 @@ export default function UsersPage() {
                           ))}
                       </SelectContent>
                     </Select>
-                    {currentUser?.roleCode === ROLES.ADMIN &&
-                      editUser?.roleCode === ROLES.ADMIN && (
+                    {isAdministrativeRole(currentUser?.roleCode) &&
+                      isAdministrativeRole(editUser?.roleCode) && (
                         <p className="text-xs text-muted-foreground">
                           Admins cannot change the role of super admins.
                         </p>
@@ -810,9 +855,9 @@ export default function UsersPage() {
               </div>
             )}
             <AlertDialogFooter>
-              <AlertDialogCancel>Cancel</AlertDialogCancel>
-              <AlertDialogAction onClick={onDelete}>
-                Delete User
+              <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
+              <AlertDialogAction onClick={onDelete} disabled={deleting}>
+                {deleting ? "Deleting..." : "Delete User"}
               </AlertDialogAction>
             </AlertDialogFooter>
           </AlertDialogContent>
@@ -827,9 +872,9 @@ export default function UsersPage() {
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
-              <AlertDialogCancel>Cancel</AlertDialogCancel>
-              <AlertDialogAction onClick={onBulkDelete}>
-                Delete {selectedIds.size} User{selectedIds.size !== 1 ? "s" : ""}
+              <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
+              <AlertDialogAction onClick={onBulkDelete} disabled={deleting}>
+                {deleting ? "Deleting..." : `Delete ${selectedIds.size} User${selectedIds.size !== 1 ? "s" : ""}`}
               </AlertDialogAction>
             </AlertDialogFooter>
           </AlertDialogContent>

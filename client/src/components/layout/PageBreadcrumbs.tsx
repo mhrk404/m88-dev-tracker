@@ -9,11 +9,12 @@ import {
   BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb"
 
-function getBreadcrumbs(pathname: string) {
+function getBreadcrumbs(pathname: string, compact: boolean) {
   const crumbs: Array<{ label: string; path: string }> = []
   
-  // Always start with Dashboard
-  crumbs.push({ label: "Dashboard", path: "/dashboard" })
+  if (!compact) {
+    crumbs.push({ label: "Dashboard", path: "/dashboard" })
+  }
   
   if (pathname === "/dashboard") {
     return crumbs
@@ -41,6 +42,11 @@ function getBreadcrumbs(pathname: string) {
     crumbs.push({ label: "Users", path: "/users" })
   } else if (pathname === "/lookups") {
     crumbs.push({ label: "Lookups", path: "/lookups" })
+  } else if (pathname === "/role-access") {
+    crumbs.push({ label: "Role Access", path: "/role-access" })
+  } else if (pathname.startsWith("/role-access/")) {
+    crumbs.push({ label: "Role Access", path: "/role-access" })
+    crumbs.push({ label: "Specific Access", path: pathname })
   } else if (pathname === "/help") {
     crumbs.push({ label: "Help Center", path: "/help" })
   }
@@ -48,12 +54,15 @@ function getBreadcrumbs(pathname: string) {
   return crumbs
 }
 
-export default function PageBreadcrumbs() {
-  const location = useLocation()
-  const breadcrumbs = getBreadcrumbs(location.pathname)
+type PageBreadcrumbsProps = {
+  compact?: boolean
+}
 
-  // Don't show breadcrumbs if only Dashboard
-  if (breadcrumbs.length <= 1) {
+export default function PageBreadcrumbs({ compact = false }: PageBreadcrumbsProps) {
+  const location = useLocation()
+  const breadcrumbs = getBreadcrumbs(location.pathname, compact)
+
+  if (breadcrumbs.length === 0 || (compact && breadcrumbs.length <= 1)) {
     return null
   }
 

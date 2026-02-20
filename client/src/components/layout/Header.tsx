@@ -12,6 +12,7 @@ const routeTitles: Record<string, string> = {
   "/analytics": "Analytics",
   "/users": "Users",
   "/lookups": "Lookups",
+  "/role-access": "Role Access",
   "/help": "Help Center",
 }
 
@@ -26,6 +27,10 @@ function getPageTitle(pathname: string): string {
     if (pathname.includes("stage-edit")) return "Edit stage"
     if (pathname.includes("/edit")) return "Edit Sample"
     return "Sample Details"
+  }
+
+  if (pathname.startsWith("/role-access/")) {
+    return "Specific Access"
   }
 
   // Default fallback
@@ -45,7 +50,7 @@ export default function Header() {
   const showCreateUserButton = location.pathname === "/users" && canCreateUsers
 
   return (
-    <header className="flex h-16 items-center justify-between border-b bg-background px-6">
+    <header className="flex h-16 items-center justify-between border-b dark:border-opacity-30 bg-background px-6">
       <h1 className="text-xl font-semibold text-foreground">{title}</h1>
       {showCreateSampleButton ? (
         <Button onClick={() => navigate("/samples/new")} size="sm">

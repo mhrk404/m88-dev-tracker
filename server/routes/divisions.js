@@ -1,15 +1,15 @@
 import express from 'express';
 import * as ctrl from '../controllers/divisionsController.js';
 import { authenticate } from '../middleware/auth.js';
-import { requireAdmin, requireAuth } from '../middleware/rbac.js';
+import { requireFeatureRead, requireFeatureWrite } from '../middleware/rbac.js';
 
 const router = express.Router();
 
 router.use(authenticate);
-router.get('/', requireAuth, ctrl.list);
-router.get('/:id', requireAuth, ctrl.getOne);
-router.post('/', requireAdmin, ctrl.create);
-router.put('/:id', requireAdmin, ctrl.update);
-router.delete('/:id', requireAdmin, ctrl.remove);
+router.get('/', requireFeatureRead('DIVISIONS'), ctrl.list);
+router.get('/:id', requireFeatureRead('DIVISIONS'), ctrl.getOne);
+router.post('/', requireFeatureWrite('DIVISIONS'), ctrl.create);
+router.put('/:id', requireFeatureWrite('DIVISIONS'), ctrl.update);
+router.delete('/:id', requireFeatureWrite('DIVISIONS'), ctrl.remove);
 
 export default router;

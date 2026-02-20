@@ -1,6 +1,29 @@
 import { supabase } from '../config/supabase.js';
 import { logAudit, auditMeta } from '../services/auditService.js';
 
+const ROLE_PERMISSION_STAGES = [
+  'PSI',
+  'SAMPLE_DEVELOPMENT',
+  'PC_REVIEW',
+  'COSTING',
+  'SCF',
+  'SHIPMENT_TO_BRAND',
+];
+
+const ROLE_PERMISSION_FEATURES = [
+  'USERS',
+  'ROLES',
+  'BRANDS',
+  'SEASONS',
+  'DIVISIONS',
+  'PRODUCT_CATEGORIES',
+  'SAMPLE_TYPES',
+  'ANALYTICS',
+  'EXPORT',
+];
+
+const ROLE_PERMISSION_KEYS = [...ROLE_PERMISSION_STAGES, ...ROLE_PERMISSION_FEATURES];
+
 export const list = async (req, res) => {
   try {
     const { data, error } = await supabase.from('roles').select('*').order('name');
@@ -88,5 +111,135 @@ export const remove = async (req, res) => {
   } catch (err) {
     console.error('roles remove:', err);
     return res.status(500).json({ error: err.message ?? 'Failed to delete role' });
+  }
+};
+
+export const listPermissions = async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (Number.isNaN(id)) return res.status(400).json({ error: 'Invalid id' });
+
+    const { data: role, error: roleErr } = await supabase
+      .from('roles')
+      .select('id, code, name')
+      .eq('id', id)
+      .maybeSingle();
+    if (roleErr) throw roleErr;
+    if (!role) return res.status(404).json({ error: 'Role not found' });
+
+    const { data: stageData, error: stageError } = await supabase
+      .from('role_permission')
+      .select('role, stage, can_read, can_write, can_approve')
+      .eq('role', role.code)
+      .order('stage');
+    if (stageError) throw stageError;
+
+    const { data: featureData, error: featureError } = await supabase
+      .from('role_feature_permission')
+      .select('role, feature, can_read, can_write, can_approve')
+      .eq('role', role.code)
+      .order('feature');
+
+    if (featureError && featureError.code !== '42P01') throw featureError;
+
+    const stageMap = new Map((stageData || []).map((row) => [row.stage, row]));
+    const featureMap = new Map((featureData || []).map((row) => [row.feature, row]));
+    const permissions = ROLE_PERMISSION_KEYS.map((key) => {
+      const row = ROLE_PERMISSION_STAGES.includes(key) ? stageMap.get(key) : featureMap.get(key);
+      return {
+        role: role.code,
+        stage: key,
+        can_read: !!row?.can_read,
+        can_write: !!row?.can_write,
+        can_approve: !!row?.can_approve,
+      };
+    });
+
+    return res.json({ role, permissions });
+  } catch (err) {
+    console.error('roles listPermissions:', err);
+    return res.status(500).json({ error: err.message ?? 'Failed to list role permissions' });
+  }
+};
+
+export const updatePermissions = async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (Number.isNaN(id)) return res.status(400).json({ error: 'Invalid id' });
+
+    const { data: role, error: roleErr } = await supabase
+      .from('roles')
+      .select('id, code, name')
+      .eq('id', id)
+      .maybeSingle();
+    if (roleErr) throw roleErr;
+    if (!role) return res.status(404).json({ error: 'Role not found' });
+
+    const permissions = Array.isArray(req.body?.permissions) ? req.body.permissions : null;
+    if (!permissions) return res.status(400).json({ error: 'permissions array is required' });
+
+    const stageUpserts = [];
+    const featureUpserts = [];
+    for (const p of permissions) {
+      const stage = String(p?.stage || '').trim().toUpperCase();
+      if (!ROLE_PERMISSION_KEYS.includes(stage)) {
+        return res.status(400).json({ error: `Invalid stage: ${stage || '(empty)'}` });
+      }
+      if (ROLE_PERMISSION_STAGES.includes(stage)) {
+        stageUpserts.push({
+          role: role.code,
+          stage,
+          can_read: !!p?.can_read,
+          can_write: !!p?.can_write,
+          can_approve: !!p?.can_approve,
+        });
+      } else {
+        featureUpserts.push({
+          role: role.code,
+          feature: stage,
+          can_read: !!p?.can_read,
+          can_write: !!p?.can_write,
+          can_approve: !!p?.can_approve,
+        });
+      }
+    }
+
+    if (stageUpserts.length === 0 && featureUpserts.length === 0) {
+      return res.status(400).json({ error: 'At least one permission row is required' });
+    }
+
+    if (stageUpserts.length > 0) {
+      const { error } = await supabase
+        .from('role_permission')
+        .upsert(stageUpserts, { onConflict: 'role,stage' });
+      if (error) throw error;
+    }
+
+    if (featureUpserts.length > 0) {
+      const { error } = await supabase
+        .from('role_feature_permission')
+        .upsert(featureUpserts, { onConflict: 'role,feature' });
+      if (error) throw error;
+    }
+
+    const { ip, userAgent } = auditMeta(req);
+    await logAudit({
+      userId: req.user?.id,
+      action: 'update',
+      resource: 'role_permission',
+      resourceId: String(role.id),
+      details: {
+        code: role.code,
+        stages: stageUpserts.map((u) => u.stage),
+        features: featureUpserts.map((u) => u.feature),
+      },
+      ip,
+      userAgent,
+    });
+
+    return res.json({ success: true });
+  } catch (err) {
+    console.error('roles updatePermissions:', err);
+    return res.status(500).json({ error: err.message ?? 'Failed to update role permissions' });
   }
 };

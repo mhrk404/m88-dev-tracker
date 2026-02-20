@@ -94,23 +94,12 @@ CREATE INDEX IF NOT EXISTS idx_pc_review_sample_id ON pc_review (sample_id);
 -- ── COSTING (owner: COSTING / PBD) ────────────────────────────────────────────
 -- COSTING + PBD: write  |  ALL: read
 CREATE TABLE IF NOT EXISTS costing (
-  cost_id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  sample_id       UUID NOT NULL UNIQUE REFERENCES sample_request (sample_id) ON DELETE CASCADE,
-  est_due_date    DATE,
-  fty_due_date    DATE,
-  due_week        TEXT,
-  cbd_month       INTEGER,
-  cbd_year        INTEGER,
-  submit_perf     TEXT,
-  team_member     TEXT,
-  ng_entry_date   DATE,
-  ownership       TEXT,
-  sent_to_brand   TEXT,
-  cost_lead_time  TEXT,
-  sent_status     TEXT,
-  stage_status    TEXT,              -- COSTING_RECEIVED | COSTING_COMPLETE
-  created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
-  updated_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+  cost_id           UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  sample_id         UUID NOT NULL UNIQUE REFERENCES sample_request (sample_id) ON DELETE CASCADE,
+  sent_status       TEXT,
+  cost_sheet_date   DATE,
+  created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at        TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 CREATE TRIGGER costing_updated_at

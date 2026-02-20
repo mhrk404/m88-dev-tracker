@@ -1,5 +1,16 @@
-import { useEffect, useState, useCallback } from "react"
+import { useEffect, useState, useCallback, useMemo } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Button } from "@/components/ui/button"
+import { Checkbox } from "@/components/ui/checkbox"
+import { Label } from "@/components/ui/label"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
 import {
   Select,
   SelectContent,
@@ -7,182 +18,402 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table"
-import { getSubmissionPerformance, getDeliveryPerformance } from "@/api/analytics"
+import { exportDeliveryPerformance, getDeliveryPerformance } from "@/api/analytics"
 import { listBrands } from "@/api/brands"
 import type {
-  SubmissionPerformanceResponse,
   DeliveryPerformanceResponse,
-  PerformanceSummary,
   PerformanceByBrand,
+  PerformanceSummary,
+  PerformanceTrendPoint,
 } from "@/types/analytics"
 import type { Brand } from "@/types/lookups"
-import { BarChart3, Send, Truck, Loader2 } from "lucide-react"
-import { Loading } from "@/components/ui/loading"
+import { BarChart3, Send, Loader2, CheckCircle2, Clock3, Gauge, TrendingUp, Table, Download } from "lucide-react"
+import { AnalyticsSkeleton } from "@/components/ui/skeletons"
+import { Link } from "react-router-dom"
+import {
+  Chart as ChartJS,
+  CategoryScale,
+  LinearScale,
+  BarElement,
+  LineElement,
+  PointElement,
+  Tooltip,
+  Legend,
+  type ChartOptions,
+} from "chart.js"
+import { Bar, Line } from "react-chartjs-2"
 
-const MONTHS = [
-  { value: "", label: "All months" },
-  ...Array.from({ length: 12 }, (_, i) => ({
-    value: String(i + 1),
-    label: new Date(2000, i, 1).toLocaleString("default", { month: "long" }),
-  })),
+ChartJS.register(CategoryScale, LinearScale, BarElement, LineElement, PointElement, Tooltip, Legend)
+
+type BrandRow = PerformanceByBrand & {
+  totalCompleted: number
+  onTimePct: number
+  totalStyles: number
+}
+
+const STATUS_OPTIONS = [
+  { value: "all", label: "All statuses" },
+  { value: "early", label: "Early" },
+  { value: "on_time", label: "On Time" },
+  { value: "delay", label: "Delayed" },
 ]
 
-const currentYear = new Date().getFullYear()
-const YEAR_OPTIONS = [
-  { value: "", label: "All years" },
-  ...Array.from({ length: 5 }, (_, i) => ({
-    value: String(currentYear - i),
-    label: String(currentYear - i),
-  })),
-]
+const THRESHOLD_OPTIONS = ["90", "80", "70", "60", "50", "40", "30"]
 
-function SummaryCards({ summary }: { summary: PerformanceSummary }) {
-  const pct = summary.percentage
+const STATUS_LABELS: Record<string, string> = {
+  early: "Early",
+  on_time: "On Time",
+  delay: "Delayed",
+}
+
+const EXPORT_SECTION_OPTIONS = [
+  { key: "summary", label: "Summary KPIs" },
+  { key: "brandBreakdown", label: "Delivery Status Breakdown by Brand" },
+  { key: "onTime", label: "On-Time Delivery Performance" },
+  { key: "trend", label: "Trend Over Time" },
+  { key: "table", label: "Detailed Table" },
+] as const
+
+type ExportSectionKey = (typeof EXPORT_SECTION_OPTIONS)[number]["key"]
+
+const formatPct = (value: number) => `${value.toFixed(1)}%`
+
+const onTimePercentFor = (row: PerformanceByBrand) => {
+  const completed = row.early + row.on_time + row.delay
+  return completed ? Math.round((row.on_time / completed) * 1000) / 10 : 0
+}
+
+const colorForPercent = (value: number) => {
+  const clamped = Math.min(100, Math.max(0, value)) / 100
+  const r = Math.round(239 + (16 - 239) * clamped)
+  const g = Math.round(68 + (185 - 68) * clamped)
+  const b = Math.round(68 + (129 - 68) * clamped)
+  return `rgba(${r}, ${g}, ${b}, 0.85)`
+}
+
+function SummaryKpis({ summary }: {
+  summary: PerformanceSummary
+}) {
+  const total = summary.total
+  const efficiency = summary.percentage?.on_time ?? 0
+  const earlyPct = summary.percentage?.early ?? 0
+  const delayedPct = summary.percentage?.delay ?? 0
 
   return (
-    <div className="grid gap-3 grid-cols-2 sm:grid-cols-4">
-      <Card>
-        <CardHeader className="pb-2">
-          <CardTitle className="text-sm font-medium text-muted-foreground">Total</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="text-2xl font-bold">{summary.total.toLocaleString()}</div>
-        </CardContent>
-      </Card>
-      <Card>
-        <CardHeader className="pb-2">
-          <CardTitle className="text-sm font-medium text-muted-foreground">Early</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="text-2xl font-bold text-emerald-600 dark:text-emerald-400">
-            {summary.early.toLocaleString()}
+    <Card>
+      <CardContent className="p-0">
+        <div className="grid grid-cols-1 divide-y sm:grid-cols-2 lg:grid-cols-4 lg:divide-x lg:divide-y-0">
+          <div className="flex items-center gap-3 p-4">
+            <div className="flex h-9 w-9 items-center justify-center rounded-full bg-muted">
+              <CheckCircle2 className="h-4 w-4 text-muted-foreground" />
+            </div>
+            <div>
+              <p className="text-sm text-muted-foreground">Total Deliveries</p>
+              <p className="text-2xl font-semibold leading-none">{total.toLocaleString()}</p>
+            </div>
           </div>
-          {pct && <p className="text-xs text-muted-foreground">{pct.early}% of completed</p>}
-        </CardContent>
-      </Card>
-      <Card>
-        <CardHeader className="pb-2">
-          <CardTitle className="text-sm font-medium text-muted-foreground">On Time</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="text-2xl font-bold text-blue-600 dark:text-blue-400">
-            {summary.on_time.toLocaleString()}
+
+          <div className="flex items-center gap-3 p-4">
+            <div className="flex h-9 w-9 items-center justify-center rounded-full bg-muted">
+              <Clock3 className="h-4 w-4 text-muted-foreground" />
+            </div>
+            <div>
+              <p className="text-sm text-muted-foreground">Overall On-Time</p>
+              <p className="text-2xl font-semibold leading-none">{formatPct(efficiency)}</p>
+            </div>
           </div>
-          {pct && <p className="text-xs text-muted-foreground">{pct.on_time}% of completed</p>}
-        </CardContent>
-      </Card>
-      <Card>
-        <CardHeader className="pb-2">
-          <CardTitle className="text-sm font-medium text-muted-foreground">Delayed</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="text-2xl font-bold text-destructive">{summary.delay.toLocaleString()}</div>
-          {pct && <p className="text-xs text-muted-foreground">{pct.delay}% of completed</p>}
-        </CardContent>
-      </Card>
-      <Card className="sm:col-span-2 md:col-span-4">
-        <CardHeader className="pb-2">
-          <CardTitle className="text-sm font-medium text-muted-foreground">Pending</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="text-2xl font-bold text-amber-600 dark:text-amber-400">
-            {summary.pending.toLocaleString()}
+
+          <div className="flex items-center gap-3 p-4">
+            <div className="flex h-9 w-9 items-center justify-center rounded-full bg-muted">
+              <Gauge className="h-4 w-4 text-muted-foreground" />
+            </div>
+            <div>
+              <p className="text-sm text-muted-foreground">Early %</p>
+              <p className="text-2xl font-semibold leading-none">
+                {formatPct(earlyPct)}
+              </p>
+            </div>
           </div>
-          <p className="text-xs text-muted-foreground">Awaiting completion</p>
-        </CardContent>
-      </Card>
+
+          <div className="flex items-center gap-3 p-4">
+            <div className="flex h-9 w-9 items-center justify-center rounded-full bg-muted">
+              <TrendingUp className="h-4 w-4 text-muted-foreground" />
+            </div>
+            <div>
+              <p className="text-sm text-muted-foreground">Delayed %</p>
+              <p className="text-2xl font-semibold leading-none">
+                {formatPct(delayedPct)}
+              </p>
+            </div>
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  )
+}
+
+function DeliveryStatusByBrandChart({ rows, statusFilter }: { rows: BrandRow[]; statusFilter: string }) {
+  if (!rows.length) {
+    return <div className="text-sm text-muted-foreground">No brand breakdown available for the selected filters.</div>
+  }
+
+  const chartData = {
+    labels: rows.map((row) => row.brand_name),
+    datasets: [
+      {
+        label: "Delayed",
+        data: rows.map((row) => row.delay),
+        backgroundColor: "rgba(239, 68, 68, 0.85)",
+        borderColor: "rgba(239, 68, 68, 1)",
+        borderWidth: 1,
+        borderRadius: 4,
+        borderSkipped: false as const,
+      },
+      {
+        label: "Early",
+        data: rows.map((row) => row.early),
+        backgroundColor: "rgba(16, 185, 129, 0.85)",
+        borderColor: "rgba(16, 185, 129, 1)",
+        borderWidth: 1,
+        borderRadius: 4,
+        borderSkipped: false as const,
+      },
+      {
+        label: "On Time",
+        data: rows.map((row) => row.on_time),
+        backgroundColor: "rgba(59, 130, 246, 0.85)",
+        borderColor: "rgba(59, 130, 246, 1)",
+        borderWidth: 1,
+        borderRadius: 4,
+        borderSkipped: false as const,
+      },
+    ],
+  }
+
+  const filteredDatasets = statusFilter === "all"
+    ? chartData.datasets
+    : chartData.datasets.filter((dataset) => dataset.label === STATUS_LABELS[statusFilter])
+
+  const filteredData = { ...chartData, datasets: filteredDatasets }
+
+  const options: ChartOptions<"bar"> = {
+    responsive: true,
+    maintainAspectRatio: false,
+    interaction: { mode: "index", intersect: false },
+    plugins: {
+      legend: {
+        position: "top",
+        labels: { usePointStyle: true, pointStyle: "circle", boxWidth: 8, boxHeight: 8 },
+      },
+      tooltip: {
+        callbacks: {
+          title(items) {
+            return items[0]?.label || ""
+          },
+          label(context) {
+            const value = context.raw as number
+            const label = context.dataset.label || ""
+            return `${label}: ${value.toLocaleString()}`
+          },
+        },
+      },
+    },
+    scales: {
+      x: {
+        stacked: true,
+        grid: { display: false },
+        ticks: { maxRotation: 35, minRotation: 0 },
+      },
+      y: {
+        stacked: true,
+        beginAtZero: true,
+        ticks: {
+          callback(value) {
+            return Number(value).toLocaleString()
+          },
+        },
+        title: { display: true, text: "Deliveries" },
+      },
+    },
+  }
+
+  return (
+    <div className="h-[380px] w-full rounded-lg border p-3 md:h-[440px]">
+      <Bar data={filteredData} options={options} />
+      <div className="mt-2 text-xs text-muted-foreground">
+        Stacked by count for quick comparisons across brands.
+      </div>
     </div>
   )
 }
 
-function ByBrandTable({ rows }: { rows: PerformanceByBrand[] }) {
-  if (!rows.length) return null
+function OnTimePerformanceChart({ rows }: { rows: BrandRow[] }) {
+  if (!rows.length) {
+    return <div className="text-sm text-muted-foreground">No on-time performance data for the selected filters.</div>
+  }
+
+  const chartData = {
+    labels: rows.map((row) => row.brand_name),
+    datasets: [
+      {
+        label: "On-Time %",
+        data: rows.map((row) => row.onTimePct),
+        backgroundColor: rows.map((row) => colorForPercent(row.onTimePct)),
+        borderColor: rows.map((row) => colorForPercent(row.onTimePct).replace("0.85", "1")),
+        borderWidth: 1,
+        borderRadius: 6,
+      },
+    ],
+  }
+
+  const options: ChartOptions<"bar"> = {
+    responsive: true,
+    maintainAspectRatio: false,
+    indexAxis: "y",
+    plugins: {
+      legend: { display: false },
+      tooltip: {
+        callbacks: {
+          label(context) {
+            return `On-Time: ${formatPct(context.raw as number)}`
+          },
+        },
+      },
+    },
+    scales: {
+      x: {
+        beginAtZero: true,
+        max: 100,
+        ticks: {
+          callback(value) {
+            return `${value}%`
+          },
+        },
+        title: { display: true, text: "On-Time Percentage" },
+      },
+      y: {
+        grid: { display: false },
+      },
+    },
+  }
 
   return (
-    <Table>
-      <TableHeader>
-        <TableRow>
-          <TableHead>Brand</TableHead>
-          <TableHead className="text-right">Total</TableHead>
-          <TableHead className="text-right">Early</TableHead>
-          <TableHead className="text-right">On Time</TableHead>
-          <TableHead className="text-right">Delayed</TableHead>
-          <TableHead className="text-right">Pending</TableHead>
-          {rows.some((r) => r.percentage) && (
-            <TableHead className="text-right">On time %</TableHead>
-          )}
-        </TableRow>
-      </TableHeader>
-      <TableBody>
-        {rows.map((row) => (
-          <TableRow key={String(row.brand_id)}>
-            <TableCell className="font-medium">{row.brand_name}</TableCell>
-            <TableCell className="text-right">{(row.total ?? row.early + row.on_time + row.delay + row.pending).toLocaleString()}</TableCell>
-            <TableCell className="text-right text-emerald-600 dark:text-emerald-400">
-              {row.early.toLocaleString()}
-            </TableCell>
-            <TableCell className="text-right text-blue-600 dark:text-blue-400">
-              {row.on_time.toLocaleString()}
-            </TableCell>
-            <TableCell className="text-right text-destructive">{row.delay.toLocaleString()}</TableCell>
-            <TableCell className="text-right text-amber-600 dark:text-amber-400">
-              {row.pending.toLocaleString()}
-            </TableCell>
-            {row.percentage && (
-              <TableCell className="text-right text-muted-foreground">
-                {row.percentage.on_time}%
-              </TableCell>
-            )}
-          </TableRow>
-        ))}
-      </TableBody>
-    </Table>
+    <div className="h-[360px] w-full rounded-lg border p-3 md:h-[420px]">
+      <Bar data={chartData} options={options} />
+      <div className="mt-2 text-xs text-muted-foreground">
+        Rank brands by on-time performance.
+      </div>
+    </div>
+  )
+}
+
+function TrendOverTimeChart({ trend, statusFilter }: { trend: PerformanceTrendPoint[]; statusFilter: string }) {
+  if (!trend.length) {
+    return <div className="text-sm text-muted-foreground">No trend data available for the selected range.</div>
+  }
+
+  const datasets = [
+    {
+      label: "Early",
+      data: trend.map((row) => row.early),
+      borderColor: "rgba(16, 185, 129, 1)",
+      backgroundColor: "rgba(16, 185, 129, 0.2)",
+      tension: 0.3,
+    },
+    {
+      label: "On Time",
+      data: trend.map((row) => row.on_time),
+      borderColor: "rgba(59, 130, 246, 1)",
+      backgroundColor: "rgba(59, 130, 246, 0.2)",
+      tension: 0.3,
+    },
+    {
+      label: "Delayed",
+      data: trend.map((row) => row.delay),
+      borderColor: "rgba(239, 68, 68, 1)",
+      backgroundColor: "rgba(239, 68, 68, 0.2)",
+      tension: 0.3,
+    },
+  ]
+
+  const filteredDatasets = statusFilter === "all"
+    ? datasets
+    : datasets.filter((dataset) => dataset.label === STATUS_LABELS[statusFilter])
+
+  const chartData = {
+    labels: trend.map((row) => row.label),
+    datasets: filteredDatasets,
+  }
+
+  const options: ChartOptions<"line"> = {
+    responsive: true,
+    maintainAspectRatio: false,
+    interaction: { mode: "index", intersect: false },
+    plugins: {
+      legend: {
+        position: "top",
+        labels: { usePointStyle: true, pointStyle: "circle", boxWidth: 8, boxHeight: 8 },
+      },
+    },
+    scales: {
+      x: {
+        grid: { display: false },
+      },
+      y: {
+        beginAtZero: true,
+        ticks: {
+          callback(value) {
+            return Number(value).toLocaleString()
+          },
+        },
+        title: { display: true, text: "Deliveries" },
+      },
+    },
+  }
+
+  return (
+    <div className="h-[320px] w-full rounded-lg border p-3 md:h-[380px]">
+      <Line data={chartData} options={options} />
+      <div className="mt-2 text-xs text-muted-foreground">
+        Track delivery performance trends over time.
+      </div>
+    </div>
   )
 }
 
 export default function AnalyticsPage() {
   const [brands, setBrands] = useState<Brand[]>([])
   const [brandId, setBrandId] = useState<string>("")
-  const [month, setMonth] = useState<string>("")
-  const [year, setYear] = useState<string>("")
-  const [submission, setSubmission] = useState<SubmissionPerformanceResponse | null>(null)
+  const [statusFilter, setStatusFilter] = useState<string>("all")
+  const [threshold, setThreshold] = useState<string>("all")
+  const [exportOpen, setExportOpen] = useState(false)
+  const [exportType, setExportType] = useState<"csv" | "pdf">("pdf")
+  const [selectedSections, setSelectedSections] = useState<ExportSectionKey[]>(
+    EXPORT_SECTION_OPTIONS.map((section) => section.key)
+  )
+  const [exporting, setExporting] = useState(false)
   const [delivery, setDelivery] = useState<DeliveryPerformanceResponse | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
   const params = {
     brandId: brandId ? Number(brandId) : undefined,
-    month: month ? Number(month) : undefined,
-    year: year ? Number(year) : undefined,
   }
 
   const loadData = useCallback(async () => {
     setLoading(true)
     setError(null)
     try {
-      const [subRes, delRes] = await Promise.all([
-        getSubmissionPerformance(params),
-        getDeliveryPerformance(params),
-      ])
-      setSubmission(subRes)
-      setDelivery(delRes)
+      const deliveryRes = await getDeliveryPerformance(params)
+      setDelivery(deliveryRes)
     } catch (e) {
       console.error("Analytics load failed:", e)
       setError("Failed to load analytics. Please try again.")
-      setSubmission(null)
       setDelivery(null)
     } finally {
       setLoading(false)
     }
-  }, [params.brandId, params.month, params.year])
+  }, [params.brandId])
 
   useEffect(() => {
     async function loadBrands() {
@@ -200,16 +431,235 @@ export default function AnalyticsPage() {
     loadData()
   }, [loadData])
 
-  if (loading && !submission && !delivery) {
-    return <Loading fullScreen text="Loading analytics..." />
+  const rowsWithPct = useMemo<BrandRow[]>(() => {
+    if (!delivery?.byBrand) return []
+    return delivery.byBrand.map((row) => {
+      const totalCompleted = row.early + row.on_time + row.delay
+      const totalStyles = row.style_count ?? totalCompleted
+      return {
+        ...row,
+        totalCompleted,
+        onTimePct: onTimePercentFor(row),
+        totalStyles,
+      }
+    })
+  }, [delivery])
+
+  const filteredRows = useMemo(() => {
+    let rows = rowsWithPct
+    if (statusFilter !== "all") {
+      rows = rows.filter((row) => row[statusFilter as "early" | "on_time" | "delay"] > 0)
+    }
+    if (threshold !== "all") {
+      const maxValue = Number(threshold)
+      rows = rows.filter((row) => row.onTimePct <= maxValue)
+    }
+    return rows
+  }, [rowsWithPct, statusFilter, threshold])
+
+  const clearFilters = () => {
+    setBrandId("")
+    setStatusFilter("all")
+    setThreshold("all")
+  }
+
+  const toggleExportSection = (section: ExportSectionKey) => {
+    setSelectedSections((prev) =>
+      prev.includes(section) ? prev.filter((item) => item !== section) : [...prev, section]
+    )
+  }
+
+  const handleExport = async () => {
+    if (!delivery || selectedSections.length === 0) return
+
+    setExporting(true)
+    try {
+      if (exportType === "csv") {
+        const blob = await exportDeliveryPerformance({
+          brandId: brandId ? Number(brandId) : undefined,
+          status: statusFilter !== "all" ? statusFilter : undefined,
+          threshold: threshold !== "all" ? threshold : undefined,
+        })
+        const url = URL.createObjectURL(blob)
+        const link = document.createElement("a")
+        link.href = url
+        const suffix = [
+          brandId ? `brand-${brandId}` : "all-brands",
+          statusFilter !== "all" ? `status-${statusFilter}` : null,
+          threshold !== "all" ? `threshold-${threshold}` : null,
+        ].filter(Boolean).join("_")
+        link.download = `delivery-performance_${suffix || "all"}.csv`
+        link.click()
+        URL.revokeObjectURL(url)
+      } else {
+        const selectedBrandName = brandId
+          ? brands.find((brand) => String(brand.id) === brandId)?.name ?? `Brand ${brandId}`
+          : "All brands"
+
+        const formatRow = (label: string, value: string | number) =>
+          `<tr><td style=\"padding:6px 10px;border:1px solid #ddd;\">${label}</td><td style=\"padding:6px 10px;border:1px solid #ddd;\">${value}</td></tr>`
+
+        const sections: string[] = []
+
+        if (selectedSections.includes("summary")) {
+          sections.push(`
+            <h2>Summary KPIs</h2>
+            <table style="border-collapse:collapse;width:100%;margin-bottom:12px;">
+              ${formatRow("Total Deliveries", delivery.summary.total.toLocaleString())}
+              ${formatRow("Overall On-Time", formatPct(delivery.summary.percentage?.on_time ?? 0))}
+              ${formatRow("Early %", formatPct(delivery.summary.percentage?.early ?? 0))}
+              ${formatRow("Delayed %", formatPct(delivery.summary.percentage?.delay ?? 0))}
+            </table>
+          `)
+        }
+
+        if (selectedSections.includes("brandBreakdown")) {
+          sections.push(`
+            <h2>Delivery Status Breakdown by Brand</h2>
+            <table style="border-collapse:collapse;width:100%;margin-bottom:12px;">
+              <thead>
+                <tr>
+                  <th style="padding:6px 10px;border:1px solid #ddd;text-align:left;">Brand</th>
+                  <th style="padding:6px 10px;border:1px solid #ddd;text-align:left;">Early</th>
+                  <th style="padding:6px 10px;border:1px solid #ddd;text-align:left;">On-Time</th>
+                  <th style="padding:6px 10px;border:1px solid #ddd;text-align:left;">Delayed</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${filteredRows.map((row) => `
+                  <tr>
+                    <td style="padding:6px 10px;border:1px solid #ddd;">${row.brand_name}</td>
+                    <td style="padding:6px 10px;border:1px solid #ddd;">${row.early.toLocaleString()}</td>
+                    <td style="padding:6px 10px;border:1px solid #ddd;">${row.on_time.toLocaleString()}</td>
+                    <td style="padding:6px 10px;border:1px solid #ddd;">${row.delay.toLocaleString()}</td>
+                  </tr>
+                `).join("")}
+              </tbody>
+            </table>
+          `)
+        }
+
+        if (selectedSections.includes("onTime")) {
+          sections.push(`
+            <h2>On-Time Delivery Performance</h2>
+            <table style="border-collapse:collapse;width:100%;margin-bottom:12px;">
+              <thead>
+                <tr>
+                  <th style="padding:6px 10px;border:1px solid #ddd;text-align:left;">Brand</th>
+                  <th style="padding:6px 10px;border:1px solid #ddd;text-align:left;">On-Time %</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${filteredRows.map((row) => `
+                  <tr>
+                    <td style="padding:6px 10px;border:1px solid #ddd;">${row.brand_name}</td>
+                    <td style="padding:6px 10px;border:1px solid #ddd;">${formatPct(row.onTimePct)}</td>
+                  </tr>
+                `).join("")}
+              </tbody>
+            </table>
+          `)
+        }
+
+        if (selectedSections.includes("trend")) {
+          sections.push(`
+            <h2>Trend Over Time</h2>
+            <table style="border-collapse:collapse;width:100%;margin-bottom:12px;">
+              <thead>
+                <tr>
+                  <th style="padding:6px 10px;border:1px solid #ddd;text-align:left;">Period</th>
+                  <th style="padding:6px 10px;border:1px solid #ddd;text-align:left;">Early</th>
+                  <th style="padding:6px 10px;border:1px solid #ddd;text-align:left;">On-Time</th>
+                  <th style="padding:6px 10px;border:1px solid #ddd;text-align:left;">Delayed</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${(delivery.trend ?? []).map((point) => `
+                  <tr>
+                    <td style="padding:6px 10px;border:1px solid #ddd;">${point.label}</td>
+                    <td style="padding:6px 10px;border:1px solid #ddd;">${point.early.toLocaleString()}</td>
+                    <td style="padding:6px 10px;border:1px solid #ddd;">${point.on_time.toLocaleString()}</td>
+                    <td style="padding:6px 10px;border:1px solid #ddd;">${point.delay.toLocaleString()}</td>
+                  </tr>
+                `).join("")}
+              </tbody>
+            </table>
+          `)
+        }
+
+        if (selectedSections.includes("table")) {
+          sections.push(`
+            <h2>Detailed Table</h2>
+            <table style="border-collapse:collapse;width:100%;margin-bottom:12px;">
+              <thead>
+                <tr>
+                  <th style="padding:6px 10px;border:1px solid #ddd;text-align:left;">Brand</th>
+                  <th style="padding:6px 10px;border:1px solid #ddd;text-align:left;">Early</th>
+                  <th style="padding:6px 10px;border:1px solid #ddd;text-align:left;">On-Time</th>
+                  <th style="padding:6px 10px;border:1px solid #ddd;text-align:left;">Delayed</th>
+                  <th style="padding:6px 10px;border:1px solid #ddd;text-align:left;">Total Styles</th>
+                  <th style="padding:6px 10px;border:1px solid #ddd;text-align:left;">On-Time %</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${filteredRows.map((row) => `
+                  <tr>
+                    <td style="padding:6px 10px;border:1px solid #ddd;">${row.brand_name}</td>
+                    <td style="padding:6px 10px;border:1px solid #ddd;">${row.early.toLocaleString()}</td>
+                    <td style="padding:6px 10px;border:1px solid #ddd;">${row.on_time.toLocaleString()}</td>
+                    <td style="padding:6px 10px;border:1px solid #ddd;">${row.delay.toLocaleString()}</td>
+                    <td style="padding:6px 10px;border:1px solid #ddd;">${row.totalStyles.toLocaleString()}</td>
+                    <td style="padding:6px 10px;border:1px solid #ddd;">${formatPct(row.onTimePct)}</td>
+                  </tr>
+                `).join("")}
+              </tbody>
+            </table>
+          `)
+        }
+
+        const printWindow = window.open("", "_blank", "noopener,noreferrer,width=1024,height=800")
+        if (!printWindow) {
+          throw new Error("Unable to open print window")
+        }
+
+        printWindow.document.write(`
+          <html>
+            <head>
+              <title>Delivery Performance Export</title>
+            </head>
+            <body style="font-family:Arial,sans-serif;color:#111;padding:20px;">
+              <h1 style="margin:0 0 8px 0;">Delivery Performance Report</h1>
+              <p style="margin:0 0 16px 0;color:#444;">Brand: ${selectedBrandName} | Status: ${statusFilter === "all" ? "All" : STATUS_LABELS[statusFilter]} | Threshold: ${threshold === "all" ? "All" : `<= ${threshold}%`}</p>
+              ${sections.join("") || "<p>No sections selected.</p>"}
+            </body>
+          </html>
+        `)
+        printWindow.document.close()
+        printWindow.focus()
+        printWindow.print()
+      }
+
+      setExportOpen(false)
+    } catch (e) {
+      console.error("Export failed:", e)
+      setError("Failed to export. Please try again.")
+    } finally {
+      setExporting(false)
+    }
+  }
+
+  if (loading && !delivery) {
+    return (
+      <div className="p-6">
+        <AnalyticsSkeleton />
+      </div>
+    )
   }
 
   return (
     <div className="space-y-6 p-6 bg-background">
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div className="flex items-center gap-2">
-          <BarChart3 className="h-6 w-6 text-muted-foreground" />
-          <h1 className="text-2xl font-semibold tracking-tight">Analytics</h1>
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <Select value={brandId || "all"} onValueChange={(v) => setBrandId(v === "all" ? "" : v)}>
@@ -225,40 +675,56 @@ export default function AnalyticsPage() {
               ))}
             </SelectContent>
           </Select>
-          <Select value={month || "all"} onValueChange={(v) => setMonth(v === "all" ? "" : v)}>
-            <SelectTrigger className="w-[140px]">
-              <SelectValue placeholder="Month" />
+          <Select value={statusFilter} onValueChange={setStatusFilter}>
+            <SelectTrigger className="w-[150px]">
+              <SelectValue placeholder="Status" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="all">All months</SelectItem>
-              {MONTHS.filter((m) => m.value).map((m) => (
-                <SelectItem key={m.value} value={m.value}>
-                  {m.label}
+              {STATUS_OPTIONS.map((option) => (
+                <SelectItem key={option.value} value={option.value}>
+                  {option.label}
                 </SelectItem>
               ))}
             </SelectContent>
           </Select>
-          <Select value={year || "all"} onValueChange={(v) => setYear(v === "all" ? "" : v)}>
-            <SelectTrigger className="w-[120px]">
-              <SelectValue placeholder="Year" />
+          <Select value={threshold} onValueChange={setThreshold}>
+            <SelectTrigger className="w-[190px]">
+              <SelectValue placeholder="Performance threshold" />
             </SelectTrigger>
             <SelectContent>
-              {YEAR_OPTIONS.map((y) => (
-                <SelectItem key={y.value || "all"} value={y.value || "all"}>
-                  {y.label}
+              <SelectItem value="all">All performance</SelectItem>
+              {THRESHOLD_OPTIONS.map((value) => (
+                <SelectItem key={value} value={value}>
+                  Below {value}% on-time
                 </SelectItem>
               ))}
             </SelectContent>
           </Select>
-          <button
+          <Button
             type="button"
-            onClick={() => loadData()}
+            variant="outline"
+            onClick={clearFilters}
             disabled={loading}
-            className="inline-flex items-center justify-center gap-2 rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50"
+          >
+            Clear filters
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => setExportOpen(true)}
+            disabled={!delivery || loading}
+          >
+            <Download className="h-4 w-4" />
+            Export
+          </Button>
+          <Button
+            type="button"
+            onClick={loadData}
+            disabled={loading}
           >
             {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
             Refresh
-          </button>
+          </Button>
         </div>
       </div>
 
@@ -268,31 +734,25 @@ export default function AnalyticsPage() {
         </div>
       )}
 
+      {delivery ? (
+        <SummaryKpis summary={delivery.summary} />
+      ) : null}
+
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Send className="h-5 w-5" />
-            Submission Performance
+            Delivery Status Breakdown by Brand
           </CardTitle>
           <CardDescription>
-            Due date vs actual send date (product_business_dev). Filter by brand, month, and year.
+            Compare early, on-time, and delayed deliveries across brands.
           </CardDescription>
         </CardHeader>
-        <CardContent className="space-y-4">
-          {submission ? (
-            <>
-              <SummaryCards summary={submission.summary} />
-              {submission.byBrand.length > 0 && (
-                <div>
-                  <h4 className="text-sm font-medium mb-2">By brand</h4>
-                  <ByBrandTable rows={submission.byBrand} />
-                </div>
-              )}
-            </>
+        <CardContent>
+          {delivery ? (
+            <DeliveryStatusByBrandChart rows={filteredRows} statusFilter={statusFilter} />
           ) : (
-            !loading && (
-              <div className="text-muted-foreground py-4">No submission data for the selected filters.</div>
-            )
+            !loading && <div className="text-muted-foreground py-4">No delivery data for the selected filters.</div>
           )}
         </CardContent>
       </Card>
@@ -300,31 +760,154 @@ export default function AnalyticsPage() {
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
-            <Truck className="h-5 w-5" />
-            Delivery Performance
+            <Gauge className="h-5 w-5" />
+            On-Time Delivery Performance (%)
           </CardTitle>
           <CardDescription>
-            Estimated vs actual arrival (shipping_tracking). Filter by brand, month, and year.
+            Rank brands by reliability.
           </CardDescription>
         </CardHeader>
-        <CardContent className="space-y-4">
+        <CardContent>
           {delivery ? (
-            <>
-              <SummaryCards summary={delivery.summary} />
-              {delivery.byBrand.length > 0 && (
-                <div>
-                  <h4 className="text-sm font-medium mb-2">By brand</h4>
-                  <ByBrandTable rows={delivery.byBrand} />
-                </div>
-              )}
-            </>
+            <OnTimePerformanceChart rows={filteredRows} />
           ) : (
-            !loading && (
-              <div className="text-muted-foreground py-4">No delivery data for the selected filters.</div>
-            )
+            !loading && <div className="text-muted-foreground py-4">No on-time data for the selected filters.</div>
           )}
         </CardContent>
       </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <TrendingUp className="h-5 w-5" />
+            Trend Over Time
+          </CardTitle>
+          <CardDescription>
+            Delivery performance across weeks and months.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {delivery ? (
+            <TrendOverTimeChart trend={delivery.trend ?? []} statusFilter={statusFilter} />
+          ) : (
+            !loading && <div className="text-muted-foreground py-4">No trend data for the selected filters.</div>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <div className="flex flex-wrap items-start justify-between gap-2">
+            <div>
+              <CardTitle className="flex items-center gap-2">
+                <BarChart3 className="h-5 w-5" />
+                Table View
+              </CardTitle>
+              <CardDescription>
+                Expand for detailed brand-level delivery performance.
+              </CardDescription>
+            </div>
+            <Link
+              to="/analytics/table"
+              className="inline-flex items-center justify-center gap-2 rounded-md border border-input bg-background px-3 py-2 text-xs font-medium text-foreground hover:bg-accent"
+            >
+              <Table className="h-4 w-4" />
+              Open full table
+            </Link>
+          </div>
+        </CardHeader>
+        <CardContent>
+          <details className="rounded-lg border p-3">
+            <summary className="cursor-pointer text-sm font-medium text-foreground">Show detailed table</summary>
+            <div className="mt-3 overflow-x-auto">
+              <table className="w-full min-w-[720px] text-sm">
+                <thead className="text-left text-muted-foreground">
+                  <tr>
+                    <th className="pb-2">Brand</th>
+                    <th className="pb-2">Early</th>
+                    <th className="pb-2">On-Time</th>
+                    <th className="pb-2">Delayed</th>
+                    <th className="pb-2">Total Styles</th>
+                    <th className="pb-2">On-Time %</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y">
+                  {filteredRows.map((row) => (
+                    <tr key={row.brand_id} className="text-foreground">
+                      <td className="py-2 font-medium">{row.brand_name}</td>
+                      <td className="py-2">{row.early.toLocaleString()}</td>
+                      <td className="py-2">{row.on_time.toLocaleString()}</td>
+                      <td className="py-2">{row.delay.toLocaleString()}</td>
+                      <td className="py-2">{row.totalStyles.toLocaleString()}</td>
+                      <td className="py-2">{formatPct(row.onTimePct)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {!filteredRows.length ? (
+                <div className="py-3 text-sm text-muted-foreground">No rows match the current filters.</div>
+              ) : null}
+            </div>
+          </details>
+        </CardContent>
+      </Card>
+
+      <Dialog open={exportOpen} onOpenChange={setExportOpen}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Export Delivery Performance</DialogTitle>
+            <DialogDescription>Select file type and choose what to include.</DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-4 py-2">
+            <div className="space-y-2">
+              <Label className="text-sm">File type</Label>
+              <Select value={exportType} onValueChange={(value) => setExportType(value as "csv" | "pdf") }>
+                <SelectTrigger className="w-full">
+                  <SelectValue placeholder="Select file type" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="pdf">PDF</SelectItem>
+                  <SelectItem value="csv">CSV</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
+              <Label className="text-sm">Checklist: what to export</Label>
+              <div className="space-y-2 rounded-md border p-3">
+                {EXPORT_SECTION_OPTIONS.map((section) => (
+                  <div key={section.key} className="flex items-center space-x-2">
+                    <Checkbox
+                      id={`export-section-${section.key}`}
+                      checked={selectedSections.includes(section.key)}
+                      onCheckedChange={() => toggleExportSection(section.key)}
+                    />
+                    <Label htmlFor={`export-section-${section.key}`} className="text-sm font-normal">
+                      {section.label}
+                    </Label>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setExportOpen(false)} disabled={exporting}>
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              onClick={handleExport}
+              disabled={exporting || selectedSections.length === 0 || !delivery}
+            >
+              {exporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+              Export
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
     </div>
   )
 }

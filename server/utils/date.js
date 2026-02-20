@@ -58,6 +58,24 @@ export function inMonthYear(dateStr, month, year) {
 }
 
 /**
+ * Check if a date falls within a start/end range (inclusive).
+ * @param {string|number|Date|null|undefined} dateStr
+ * @param {string|number|Date|null|undefined} start
+ * @param {string|number|Date|null|undefined} end
+ * @returns {boolean}
+ */
+export function inDateRange(dateStr, start, end) {
+  if (dateStr == null) return false;
+  const d = parseDateUTC(dateStr);
+  if (!d) return false;
+  const s = start ? parseDateUTC(start) : null;
+  const e = end ? parseDateUTC(end) : null;
+  if (s && d < s) return false;
+  if (e && d > e) return false;
+  return true;
+}
+
+/**
  * Day difference (actual - due). Rounded to nearest day.
  * @param {string|number|Date} due
  * @param {string|number|Date} actual

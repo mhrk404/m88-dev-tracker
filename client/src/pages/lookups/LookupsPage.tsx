@@ -1,7 +1,6 @@
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useState, Fragment } from "react"
 import { Plus, Pencil, Trash2 } from "lucide-react"
-import PageBreadcrumbs from "@/components/layout/PageBreadcrumbs"
-import { Loading } from "@/components/ui/loading"
+import { TableSkeleton } from "@/components/ui/skeletons"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
@@ -13,6 +12,15 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
+import {
+  Pagination,
+  PaginationContent,
+  PaginationItem,
+  PaginationLink,
+  PaginationPrevious,
+  PaginationNext,
+  PaginationEllipsis,
+} from "@/components/ui/pagination"
 import {
   Dialog,
   DialogContent,
@@ -72,6 +80,8 @@ export default function LookupsPage() {
   const [roles, setRoles] = useState<Role[]>([])
 
   const [search, setSearch] = useState("")
+  const [currentPage, setCurrentPage] = useState(1)
+  const pageSize = 10
 
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editingId, setEditingId] = useState<number | null>(null)
@@ -151,6 +161,18 @@ export default function LookupsPage() {
         return []
     }
   }, [kind, search, brands, seasons, divisions, categories, sampleTypes, roles])
+
+  const totalPages = Math.ceil(items.length / pageSize)
+  const paginatedItems = useMemo(() => {
+    const start = (currentPage - 1) * pageSize
+    const end = start + pageSize
+    return items.slice(start, end)
+  }, [items, currentPage, pageSize])
+
+  // Reset to page 1 when search or kind changes
+  useEffect(() => {
+    setCurrentPage(1)
+  }, [search, kind])
 
   function openCreate() {
     setEditingId(null)
@@ -298,12 +320,16 @@ export default function LookupsPage() {
   }
 
   if (loading) {
-    return <Loading fullScreen text="Loading lookups..." />
+    return (
+      <div className="p-6">
+        <TableSkeleton />
+      </div>
+    )
   }
 
   return (
     <RoleGate
-      allowedRoles={[ROLES.ADMIN]}
+      allowedRoles={[ROLES.ADMIN, ROLES.SUPER_ADMIN]}
       fallback={
         <div className="p-6">
           <div className="text-sm text-muted-foreground">You don’t have access to manage lookups.</div>
@@ -311,7 +337,6 @@ export default function LookupsPage() {
       }
     >
       <div className="space-y-6 p-6">
-        <PageBreadcrumbs />
 
         <Card>
           <CardHeader className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
@@ -386,7 +411,7 @@ export default function LookupsPage() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {items.map((row: any) => (
+                  {paginatedItems.map((row: any) => (
                     <TableRow key={row.id}>
                       <TableCell className="text-xs text-muted-foreground">{row.id}</TableCell>
                       <TableCell>{kind === 'seasons' ? row.code : row.name}</TableCell>
@@ -427,6 +452,66 @@ export default function LookupsPage() {
                   ))}
                 </TableBody>
               </Table>
+            )}
+
+            {items.length > pageSize && (
+              <div className="flex items-center justify-between border-t pt-4">
+                <div className="text-sm text-muted-foreground">
+                  Showing {(currentPage - 1) * pageSize + 1} to {Math.min(currentPage * pageSize, items.length)} of {items.length} {titleMap[kind].toLowerCase()}
+                </div>
+                <Pagination className="m-0">
+                  <PaginationContent>
+                    <PaginationItem>
+                      <PaginationPrevious
+                        onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                        disabled={currentPage === 1}
+                      />
+                    </PaginationItem>
+                    {Array.from({ length: totalPages }, (_, i) => i + 1)
+                      .filter((page) => {
+                        if (totalPages <= 7) return true
+                        if (page === 1 || page === totalPages) return true
+                        if (page >= currentPage - 1 && page <= currentPage + 1) return true
+                        return false
+                      })
+                      .map((page, idx, arr) => {
+                        if (idx > 0 && page > arr[idx - 1] + 1) {
+                          return (
+                            <Fragment key={`ellipsis-${page}`}>
+                              <PaginationItem>
+                                <PaginationEllipsis />
+                              </PaginationItem>
+                              <PaginationItem>
+                                <PaginationLink
+                                  isActive={currentPage === page}
+                                  onClick={() => setCurrentPage(page)}
+                                >
+                                  {page}
+                                </PaginationLink>
+                              </PaginationItem>
+                            </Fragment>
+                          )
+                        }
+                        return (
+                          <PaginationItem key={page}>
+                            <PaginationLink
+                              isActive={currentPage === page}
+                              onClick={() => setCurrentPage(page)}
+                            >
+                              {page}
+                            </PaginationLink>
+                          </PaginationItem>
+                        )
+                      })}
+                    <PaginationItem>
+                      <PaginationNext
+                        onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                        disabled={currentPage === totalPages}
+                      />
+                    </PaginationItem>
+                  </PaginationContent>
+                </Pagination>
+              </div>
             )}
           </CardContent>
         </Card>

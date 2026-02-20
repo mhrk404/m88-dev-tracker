@@ -4,7 +4,6 @@ import { ArrowLeft, Save, Upload } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Loading } from "@/components/ui/loading"
 import PageBreadcrumbs from "@/components/layout/PageBreadcrumbs"
 import {
   Select,
@@ -21,6 +20,24 @@ import type { Lookups } from "@/types/lookups"
 import { useAuth } from "@/contexts/auth"
 import { STAGES } from "@/lib/constants"
 import { toast } from "sonner"
+
+function computeLeadTime(kickoff: string | undefined, due: string | undefined) {
+  if (!kickoff || !due) return undefined
+  const kd = Date.parse(kickoff)
+  const dd = Date.parse(due)
+  if (!Number.isFinite(kd) || !Number.isFinite(dd)) return undefined
+  const days = Math.ceil((dd - kd) / (1000 * 60 * 60 * 24))
+  const weeks = Math.ceil(days / 7)
+  return weeks > 0 ? weeks : 0
+}
+
+function classifyLeadTime(weeks: number | undefined | null): "STND" | "RUSH" | undefined {
+  if (weeks == null) return undefined
+  if (weeks === 0) return undefined
+  if (weeks > 17) return "STND"
+  if (weeks >= 1 && weeks <= 17) return "RUSH"
+  return undefined
+}
 
 export default function SampleCreatePage() {
   const navigate = useNavigate()
@@ -44,7 +61,6 @@ export default function SampleCreatePage() {
     sample_type_group: "",
     coo: "",
     unfree_status: "",
-    sample_status: "Active",
     kickoff_date: "",
     sample_due_denver: "",
     requested_lead_time: undefined,
@@ -128,7 +144,6 @@ export default function SampleCreatePage() {
         unfree_status: formData.unfree_status,
         sample_type: formData.sample_type,
         sample_type_group: formData.sample_type_group,
-        sample_status: formData.sample_status,
         kickoff_date: formData.kickoff_date || null,
         sample_due_denver: formData.sample_due_denver || null,
         requested_lead_time: formData.requested_lead_time != null ? formData.requested_lead_time : null,
@@ -141,24 +156,6 @@ export default function SampleCreatePage() {
         current_stage: formData.current_stage || STAGES.SAMPLE_DEVELOPMENT,
         created_by: user.id,
       }
-      // Ensure client computes requested_lead_time from dates as weeks
-      function computeLeadTime(kickoff: string | undefined, due: string | undefined) {
-        if (!kickoff || !due) return undefined
-        const kd = Date.parse(kickoff)
-        const dd = Date.parse(due)
-        if (!Number.isFinite(kd) || !Number.isFinite(dd)) return undefined
-        const days = Math.ceil((dd - kd) / (1000 * 60 * 60 * 24))
-        const weeks = Math.ceil(days / 7)
-        return weeks > 0 ? weeks : 0
-      }
-      function classifyLeadTime(weeks: number | undefined | null) {
-        if (weeks == null) return null
-        if (weeks === 0) return null
-        if (weeks > 17) return 'STND'
-        if (weeks >= 1 && weeks <= 17) return 'RUSH'
-        return null
-      }
-
       if ((payload.requested_lead_time == null || payload.requested_lead_time === undefined) && payload.kickoff_date && payload.sample_due_denver) {
         const computed = computeLeadTime(payload.kickoff_date, payload.sample_due_denver)
         if (computed !== undefined) {
@@ -220,16 +217,6 @@ export default function SampleCreatePage() {
       let success = 0
       let failed = 0
 
-      function computeLeadTime(kickoff: string | undefined, due: string | undefined) {
-        if (!kickoff || !due) return undefined
-        const kd = Date.parse(kickoff)
-        const dd = Date.parse(due)
-        if (!Number.isFinite(kd) || !Number.isFinite(dd)) return undefined
-        const days = Math.ceil((dd - kd) / (1000 * 60 * 60 * 24))
-        const weeks = Math.ceil(days / 7)
-        return weeks > 0 ? weeks : 0
-      }
-
       for (const row of rows) {
         const style_number = row.style_number || row.styleNumber
         if (!style_number) {
@@ -251,7 +238,6 @@ export default function SampleCreatePage() {
           },
           unfree_status: row.unfree_status || "",
           sample_type: row.sample_type || row.sampleType || "",
-          sample_status: row.sample_status || row.sampleStatus || "Active",
           kickoff_date: row.kickoff_date || "",
           sample_due_denver: row.sample_due_denver || "",
           current_status: (row.current_status || row.currentStatus || "Pending").trim() || "Pending",
@@ -295,7 +281,7 @@ export default function SampleCreatePage() {
 
   return (
     <div className="space-y-6 p-6">
-      <PageBreadcrumbs />
+      <PageBreadcrumbs compact />
       <div className="flex items-center justify-between gap-4">
         <div className="flex items-center gap-2">
           <Button variant="ghost" size="icon" onClick={() => navigate("/samples")}>
@@ -512,23 +498,6 @@ export default function SampleCreatePage() {
                     <SelectContent>
                       <SelectItem value="FREE">FREE</SelectItem>
                       <SelectItem value="UNFREE">UNFREE</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="sample_status">Sample Status</Label>
-                  <Select
-                    value={formData.sample_status}
-                    onValueChange={(v) => setFormData({ ...formData, sample_status: v })}
-                    required
-                  >
-                    <SelectTrigger id="sample_status">
-                      <SelectValue placeholder="Select status" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="Active">Active</SelectItem>
-                      <SelectItem value="Inactive">Inactive</SelectItem>
-                      <SelectItem value="Dropped">Dropped</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>

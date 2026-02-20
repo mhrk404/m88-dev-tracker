@@ -4,12 +4,13 @@ import type { RoleCode } from "./constants"
 import { ROLES, STAGES, type StageName } from "./constants"
 
 export function canManageUsers(roleCode: RoleCode): boolean {
-  return roleCode === ROLES.ADMIN
+  return roleCode === ROLES.ADMIN || roleCode === ROLES.SUPER_ADMIN
 }
 
 export function canCreateSample(roleCode: RoleCode): boolean {
   return (
     roleCode === ROLES.ADMIN ||
+    roleCode === ROLES.SUPER_ADMIN ||
     roleCode === ROLES.PBD
   )
 }
@@ -17,6 +18,7 @@ export function canCreateSample(roleCode: RoleCode): boolean {
 export function canEditSample(roleCode: RoleCode): boolean {
   return (
     roleCode === ROLES.ADMIN ||
+    roleCode === ROLES.SUPER_ADMIN ||
     roleCode === ROLES.PBD
   )
 }
@@ -39,5 +41,5 @@ export function stageForRole(roleCode: RoleCode): StageName | null {
 }
 
 export function canAccessLookupsManagement(roleCode: RoleCode): boolean {
-  return roleCode === ROLES.ADMIN
+  return roleCode === ROLES.ADMIN || roleCode === ROLES.SUPER_ADMIN
 }

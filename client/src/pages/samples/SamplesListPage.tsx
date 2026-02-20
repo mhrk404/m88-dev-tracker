@@ -1,19 +1,11 @@
 import { useEffect, useMemo, useState } from "react"
 import { useNavigate } from "react-router-dom"
-import { Eye, Edit, FileEdit, Download } from "lucide-react"
+import { Eye, Edit, FileEdit, Download, Trash2, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import PageBreadcrumbs from "@/components/layout/PageBreadcrumbs"
-import { Loading } from "@/components/ui/loading"
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table"
+import { Card, CardContent } from "@/components/ui/card"
+import { TableSkeleton } from "@/components/ui/skeletons"
+import { Checkbox } from "@/components/ui/checkbox"
 import {
   Pagination,
   PaginationContent,
@@ -41,6 +33,7 @@ import {
 } from "@/components/ui/dialog"
 import {
   AlertDialog,
+  AlertDialogAction,
   AlertDialogContent,
   AlertDialogHeader,
   AlertDialogTitle,
@@ -49,7 +42,7 @@ import {
   AlertDialogCancel,
 } from "@/components/ui/alert-dialog"
 import { Label } from "@/components/ui/label"
-import { listSamples, getSample, updateSample } from "@/api/samples"
+import { listSamples, getSample, updateSample, deleteSample } from "@/api/samples"
 import { getLookups } from "@/api/lookups"
 import { exportSamplesCsv } from "@/api/export"
 import type { Sample, UpdateSampleInput } from "@/types/sample"
@@ -188,6 +181,11 @@ export default function SamplesListPage() {
   const [editFormLoading, setEditFormLoading] = useState(false)
   const [editSaving, setEditSaving] = useState(false)
   const [showSaveConfirm, setShowSaveConfirm] = useState(false)
+  const [selectedSampleIds, setSelectedSampleIds] = useState<Set<string>>(new Set())
+  const [sampleToDelete, setSampleToDelete] = useState<Sample | null>(null)
+  const [deleteOpen, setDeleteOpen] = useState(false)
+  const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false)
+  const [deleting, setDeleting] = useState(false)
 
   useEffect(() => {
     setPage(1)
@@ -334,6 +332,21 @@ export default function SamplesListPage() {
     return Array.from(set).sort((a, b) => a.localeCompare(b))
   }, [samples])
 
+  const hasActiveFilters =
+    searchQuery.trim().length > 0 ||
+    statusFilter !== "all" ||
+    filters.season_id !== undefined ||
+    filters.brand_id !== undefined ||
+    !!filters.division ||
+    !!filters.product_category
+
+  function clearAllFilters() {
+    setSearchQuery("")
+    setStatusFilter("all")
+    setFilters({})
+    setPage(1)
+  }
+
   const filteredSamples = samples.filter((sample) => {
     const query = searchQuery.trim().toLowerCase()
     const matchesQuery =
@@ -371,6 +384,115 @@ export default function SamplesListPage() {
   const userStage = user ? stageForRole(user.roleCode as RoleCode) : null
   const stageFilterLabel = userStage ? STAGE_LABELS[userStage] ?? userStage : null
 
+  const toggleSelectSample = (sampleId: string) => {
+    setSelectedSampleIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(sampleId)) {
+        next.delete(sampleId)
+      } else {
+        next.add(sampleId)
+      }
+      return next
+    })
+  }
+
+  const toggleSelectAllOnPage = () => {
+    const pageIds = pagedSamples.map((sample) => sample.id)
+    const allSelected = pageIds.length > 0 && pageIds.every((id) => selectedSampleIds.has(id))
+
+    if (allSelected) {
+      setSelectedSampleIds((prev) => {
+        const next = new Set(prev)
+        pageIds.forEach((id) => next.delete(id))
+        return next
+      })
+    } else {
+      setSelectedSampleIds((prev) => {
+        const next = new Set(prev)
+        pageIds.forEach((id) => next.add(id))
+        return next
+      })
+    }
+  }
+
+  function openDeleteSample(sample: Sample) {
+    setSampleToDelete(sample)
+    setDeleteOpen(true)
+  }
+
+  function scheduleDeleteWithUndo(ids: string[], successMessage: string) {
+    if (ids.length === 0) return
+
+    const DELAY = 5
+    let remaining = DELAY
+    let cancelled = false
+
+    setDeleteOpen(false)
+    setBulkDeleteOpen(false)
+    setSampleToDelete(null)
+
+    let intervalId: ReturnType<typeof setInterval>
+    let timeoutId: ReturnType<typeof setTimeout>
+
+    function cancel() {
+      cancelled = true
+      clearInterval(intervalId)
+      clearTimeout(timeoutId)
+      toast.dismiss(toastId)
+      toast.info("Delete cancelled")
+    }
+
+    const toastId = toast.loading(`Deleting in ${remaining}s — click Undo to cancel`, {
+      action: { label: "Undo", onClick: cancel },
+      duration: Infinity,
+    })
+
+    intervalId = setInterval(() => {
+      remaining--
+      if (remaining > 0) {
+        toast.loading(`Deleting in ${remaining}s — click Undo to cancel`, {
+          id: toastId,
+          action: { label: "Undo", onClick: cancel },
+          duration: Infinity,
+        })
+      }
+    }, 1000)
+
+    timeoutId = setTimeout(async () => {
+      clearInterval(intervalId)
+      if (cancelled) return
+      toast.dismiss(toastId)
+
+      setDeleting(true)
+      try {
+        await Promise.all(ids.map((id) => deleteSample(id)))
+        toast.success(successMessage)
+        setSelectedSampleIds((prev) => {
+          const next = new Set(prev)
+          ids.forEach((id) => next.delete(id))
+          return next
+        })
+        await refreshSamples()
+      } catch (err: any) {
+        console.error("Delete sample failed:", err)
+        toast.error(err?.response?.data?.error || "Failed to delete sample(s)")
+      } finally {
+        setDeleting(false)
+      }
+    }, DELAY * 1000)
+  }
+
+  async function onDeleteSample() {
+    if (!sampleToDelete) return
+    scheduleDeleteWithUndo([sampleToDelete.id], "Sample deleted")
+  }
+
+  async function onBulkDeleteSamples() {
+    if (selectedSampleIds.size === 0) return
+    const ids = Array.from(selectedSampleIds)
+    scheduleDeleteWithUndo(ids, `${ids.length} sample(s) deleted`)
+  }
+
   async function onExport() {
     try {
       setExporting(true)
@@ -396,274 +518,333 @@ export default function SamplesListPage() {
   }
 
   if (loading) {
-    return <Loading fullScreen text="Loading samples..." />
+    return (
+      <div className="space-y-6 px-6 mt-5">
+        <TableSkeleton />
+      </div>
+    )
   }
 
   return (
-    <div className="space-y-6 p-6">
-      <PageBreadcrumbs />
-      <Card className="border-0 -mx-6 px-6">
-        <CardHeader className="px-0 flex flex-row items-start justify-between space-y-0 gap-4">
-          <div className="space-y-1.5">
-            <CardTitle>Filters</CardTitle>
-            <CardDescription>Filter samples by various criteria</CardDescription>
-          </div>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={onExport}
-            disabled={exporting}
-            className="shrink-0"
-          >
-            <Download className="h-4 w-4" />
-            {exporting ? "Exporting..." : "Export to Excel"}
-          </Button>
-        </CardHeader>
-        <CardContent className="space-y-4 px-0">
-          <div className="flex gap-4 flex-wrap">
-            <div className="flex-1 min-w-[200px]">
-              <Input
-                placeholder="Search by style number, name, or color..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full"
-              />
-            </div>
-            <Select value={statusFilter} onValueChange={setStatusFilter}>
-              <SelectTrigger className="w-[220px]">
-                <SelectValue placeholder="Status">
-                  {statusFilter === "all" ? (
-                    <span className="text-muted-foreground">All Statuses</span>
-                  ) : (
-                    <span className="inline-flex items-center gap-2">
-                      <span className={`h-2.5 w-2.5 rounded-full ${statusDotClass(statusFilter)}`} />
-                      <span>{statusFilter}</span>
-                    </span>
-                  )}
-                </SelectValue>
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">
-                  <span className="inline-flex items-center gap-2">
-                    <span className="h-2.5 w-2.5 rounded-full bg-muted-foreground/40" />
-                    <span>All Statuses</span>
-                  </span>
-                </SelectItem>
-                {availableStatuses.map((status) => (
-                  <SelectItem key={status} value={status}>
-                    <span className="inline-flex items-center gap-2">
-                      <span className={`h-2.5 w-2.5 rounded-full ${statusDotClass(status)}`} />
-                      <span>{status}</span>
-                    </span>
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            {lookups && (
-              <>
-                <Select
-                  value={filters.season_id?.toString() || "all"}
-                  onValueChange={(value) =>
-                    setFilters({ ...filters, season_id: value === "all" ? undefined : Number(value) })
-                  }
-                >
-                  <SelectTrigger className="w-[180px]">
-                    <SelectValue placeholder="Season" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All Seasons</SelectItem>
-                    {lookups.seasons.map((season) => (
-                      <SelectItem key={season.id} value={season.id.toString()}>
-                        {season.name} {season.year}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-
-                <Select
-                  value={filters.brand_id?.toString() || "all"}
-                  onValueChange={(value) =>
-                    setFilters({ ...filters, brand_id: value === "all" ? undefined : Number(value) })
-                  }
-                >
-                  <SelectTrigger className="w-[180px]">
-                    <SelectValue placeholder="Brand" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All Brands</SelectItem>
-                    {lookups.brands.map((brand) => (
-                      <SelectItem key={brand.id} value={brand.id.toString()}>
-                        {brand.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-
-                <Select
-                  value={filters.division || "all"}
-                  onValueChange={(value) =>
-                    setFilters({ ...filters, division: value === "all" ? undefined : value })
-                  }
-                >
-                  <SelectTrigger className="w-[180px]">
-                    <SelectValue placeholder="Division" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All Divisions</SelectItem>
-                    {lookups.divisions.map((division) => (
-                      <SelectItem key={division.id} value={division.name}>
-                        {division.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-
-                <Select
-                  value={filters.product_category || "all"}
-                  onValueChange={(value) =>
-                    setFilters({ ...filters, product_category: value === "all" ? undefined : value })
-                  }
-                >
-                  <SelectTrigger className="w-[180px]">
-                    <SelectValue placeholder="Category" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All Categories</SelectItem>
-                    {lookups.product_categories.map((cat) => (
-                      <SelectItem key={cat.id} value={cat.name}>
-                        {cat.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </>
-            )}
-          </div>
-        </CardContent>
-      </Card>
+    <div className="space-y-6 px-6 mt-5">
+      <div className="flex items-center justify-between">
+        <div>        </div>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={onExport}
+          disabled={exporting}
+        >
+          <Download className="h-4 w-4" />
+          {exporting ? "Exporting..." : "Export to Excel"}
+        </Button>
+      </div>
 
       <Card>
-        <CardHeader>
-          <CardTitle>Samples</CardTitle>
-          <CardDescription>
+        <CardContent className="pt-6">
+          {/* Filters */}
+          <div className="mb-6 border-b pb-6 flex justify-between items-center gap-4">
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search by style number, name, or color..."
+              className="h-9 w-full max-w-xs rounded-md border border-input bg-background px-3 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+            />
+            <div className="flex flex-wrap items-center gap-2">
+              <Select value={statusFilter} onValueChange={setStatusFilter}>
+                <SelectTrigger className="h-9 w-[160px]">
+                  <SelectValue placeholder="Status">
+                    {statusFilter === "all" ? (
+                      <span className="text-muted-foreground">All</span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1.5">
+                        <span className={`h-2 w-2 rounded-full ${statusDotClass(statusFilter)}`} />
+                        <span className="truncate">{statusFilter}</span>
+                      </span>
+                    )}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Statuses</SelectItem>
+                  {availableStatuses.map((status) => (
+                    <SelectItem key={status} value={status}>
+                      <span className="inline-flex items-center gap-2">
+                        <span className={`h-2.5 w-2.5 rounded-full ${statusDotClass(status)}`} />
+                        <span>{status}</span>
+                      </span>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {lookups && (
+                <>
+                  <Select
+                    value={filters.season_id?.toString() || "all"}
+                    onValueChange={(value) =>
+                      setFilters({ ...filters, season_id: value === "all" ? undefined : Number(value) })
+                    }
+                  >
+                    <SelectTrigger className="h-9 w-[140px]">
+                      <SelectValue placeholder="Season" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Seasons</SelectItem>
+                      {lookups.seasons.map((season) => (
+                        <SelectItem key={season.id} value={season.id.toString()}>
+                          {season.name} {season.year}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+
+                  <Select
+                    value={filters.brand_id?.toString() || "all"}
+                    onValueChange={(value) =>
+                      setFilters({ ...filters, brand_id: value === "all" ? undefined : Number(value) })
+                    }
+                  >
+                    <SelectTrigger className="h-9 w-[140px]">
+                      <SelectValue placeholder="Brand" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Brands</SelectItem>
+                      {lookups.brands.map((brand) => (
+                        <SelectItem key={brand.id} value={brand.id.toString()}>
+                          {brand.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+
+                  <Select
+                    value={filters.division || "all"}
+                    onValueChange={(value) =>
+                      setFilters({ ...filters, division: value === "all" ? undefined : value })
+                    }
+                  >
+                    <SelectTrigger className="h-9 w-[140px]">
+                      <SelectValue placeholder="Division" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Divisions</SelectItem>
+                      {lookups.divisions.map((division) => (
+                        <SelectItem key={division.id} value={division.name}>
+                          {division.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+
+                  <Select
+                    value={filters.product_category || "all"}
+                    onValueChange={(value) =>
+                      setFilters({ ...filters, product_category: value === "all" ? undefined : value })
+                    }
+                  >
+                    <SelectTrigger className="h-9 w-[140px]">
+                      <SelectValue placeholder="Category" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Categories</SelectItem>
+                      {lookups.product_categories.map((cat) => (
+                        <SelectItem key={cat.id} value={cat.name}>
+                          {cat.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </>
+              )}
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={clearAllFilters}
+                disabled={!hasActiveFilters}
+                className="h-9"
+              >
+                Clear filters
+              </Button>
+            </div>
+          </div>
+
+          {/* Sample Count */}
+          <div className="mb-4 text-sm text-muted-foreground">
             {filteredSamples.length} sample{filteredSamples.length !== 1 ? "s" : ""} found
-            {stageFilterLabel && (
-              <span className="block mt-1 text-muted-foreground">
-                Showing only samples at your stage ({stageFilterLabel}). Admins see all.
-              </span>
-            )}
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
+            {stageFilterLabel && ` • Showing only ${stageFilterLabel}`}
+          </div>
+
+          {/* Selection Banner */}
+          {canEdit && selectedSampleIds.size > 0 && (
+            <div className="mb-4 flex items-center justify-between rounded-lg border border-blue-200 bg-blue-50/50 px-4 py-3 dark:border-blue-900/30 dark:bg-blue-950/30">
+              <div className="text-sm font-medium text-blue-900 dark:text-blue-200">
+                {selectedSampleIds.size} sample{selectedSampleIds.size !== 1 ? "s" : ""} selected
+              </div>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setBulkDeleteOpen(true)}
+                  className="border-destructive/50 text-destructive hover:bg-destructive/10"
+                >
+                  <Trash2 className="h-4 w-4 mr-2" />
+                  Delete Selected
+                </Button>
+                <Button
+                  variant="ghost"
+                  size="icon-xs"
+                  onClick={() => setSelectedSampleIds(new Set())}
+                >
+                  <X className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {/* Table */}
           {filteredSamples.length === 0 ? (
-            <div className="text-center py-8 text-muted-foreground">
+            <div className="py-8 text-center text-sm text-muted-foreground">
               No samples found
             </div>
           ) : (
             <>
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Style Number</TableHead>
-                    <TableHead>Style Name</TableHead>
-                    <TableHead>Color</TableHead>
-                    <TableHead>Season</TableHead>
-                    <TableHead>Brand</TableHead>
-                    <TableHead>Division</TableHead>
-                    <TableHead>Category</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead>Stage</TableHead>
-                    <TableHead className="text-right">Actions</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {pagedSamples.map((sample) => (
-                    <TableRow
-                      key={sample.id}
-                      className="transition-colors hover:bg-muted/50"
-                    >
-                      <TableCell className="font-medium">{sample.style_number}</TableCell>
-                      <TableCell>{sample.style_name || "-"}</TableCell>
-                      <TableCell>{sample.color || "-"}</TableCell>
-                      <TableCell>
-                        {sample.seasons ? `${sample.seasons.name} ${sample.seasons.year}` : "-"}
-                      </TableCell>
-                      <TableCell>{sample.brands?.name || "-"}</TableCell>
-                      <TableCell>{sample.division || "-"}</TableCell>
-                      <TableCell>{sample.product_category || "-"}</TableCell>
-                      <TableCell>
-                        {sample.current_status ? (
-                          <span className="inline-flex items-center gap-2">
-                            <span className={`h-2.5 w-2.5 rounded-full ${statusDotClass(sample.current_status)}`} />
-                            <Badge variant="outline" className={statusBadgeClass(sample.current_status)}>
-                              {sample.current_status}
-                            </Badge>
-                          </span>
-                        ) : (
-                          "-"
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b">
+                      {canEdit && (
+                        <th className="h-10 px-2 text-left align-middle font-medium text-muted-foreground w-12">
+                          <Checkbox
+                            checked={
+                              pagedSamples.length > 0 &&
+                              pagedSamples.every((sample) => selectedSampleIds.has(sample.id))
+                            }
+                            onCheckedChange={toggleSelectAllOnPage}
+                          />
+                        </th>
+                      )}
+                      <th className="h-10 px-2 text-left align-middle font-medium text-muted-foreground">Style Number</th>
+                      <th className="h-10 px-2 text-left align-middle font-medium text-muted-foreground">Style Name</th>
+                      <th className="h-10 px-2 text-left align-middle font-medium text-muted-foreground">Color</th>
+                      <th className="h-10 px-2 text-left align-middle font-medium text-muted-foreground">Season</th>
+                      <th className="h-10 px-2 text-left align-middle font-medium text-muted-foreground">Brand</th>
+                      <th className="h-10 px-2 text-left align-middle font-medium text-muted-foreground">Division</th>
+                      <th className="h-10 px-2 text-left align-middle font-medium text-muted-foreground">Category</th>
+                      <th className="h-10 px-2 text-left align-middle font-medium text-muted-foreground">Status</th>
+                      <th className="h-10 px-2 text-left align-middle font-medium text-muted-foreground">Stage</th>
+                      <th className="h-10 px-2 text-right align-middle font-medium text-muted-foreground">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {pagedSamples.map((sample) => (
+                      <tr key={sample.id} className="border-b transition-colors hover:bg-muted/50">
+                        {canEdit && (
+                          <td className="h-12 px-2 align-middle" onClick={(e) => e.stopPropagation()}>
+                            <Checkbox
+                              checked={selectedSampleIds.has(sample.id)}
+                              onCheckedChange={() => toggleSelectSample(sample.id)}
+                            />
+                          </td>
                         )}
-                      </TableCell>
-                      <TableCell>
-                        {sample.current_stage ? (
-                          <Badge variant="secondary">{sample.current_stage}</Badge>
-                        ) : (
-                          "-"
-                        )}
-                      </TableCell>
-                      <TableCell className="text-right" data-actions>
-                        <div className="flex justify-end gap-1" data-actions>
-                          <Button
-                            variant="ghost"
-                            size="icon-xs"
-                            aria-label="View"
-                            type="button"
-                            onClick={(e) => {
-                              e.preventDefault()
-                              e.stopPropagation()
-                              navigate(`/samples/${sample.id}`)
-                            }}
-                          >
-                            <Eye className="h-4 w-4" />
-                          </Button>
-                          {canEdit && (
-                            <button
-                              type="button"
-                              aria-label="Edit sample"
-                              className="inline-flex size-6 items-center justify-center rounded-md hover:bg-accent hover:text-accent-foreground [&_svg]:size-3"
-                              onMouseDown={(e) => {
-                                e.preventDefault()
-                                e.stopPropagation()
-                              }}
-                              onClick={(e) => {
-                                e.preventDefault()
-                                e.stopPropagation()
-                                setEditingSampleId(sample.id)
-                              }}
-                            >
-                              <Edit className="h-4 w-4" />
-                            </button>
+                        <td className="h-12 px-2 align-middle font-medium">{sample.style_number}</td>
+                        <td className="h-12 px-2 align-middle">{sample.style_name || "-"}</td>
+                        <td className="h-12 px-2 align-middle">{sample.color || "-"}</td>
+                        <td className="h-12 px-2 align-middle">
+                          {sample.seasons ? `${sample.seasons.name} ${sample.seasons.year}` : "-"}
+                        </td>
+                        <td className="h-12 px-2 align-middle">{sample.brands?.name || "-"}</td>
+                        <td className="h-12 px-2 align-middle">{sample.division || "-"}</td>
+                        <td className="h-12 px-2 align-middle">{sample.product_category || "-"}</td>
+                        <td className="h-12 px-2 align-middle">
+                          {sample.current_status ? (
+                            <span className="inline-flex items-center gap-2">
+                              <span className={`h-2.5 w-2.5 rounded-full ${statusDotClass(sample.current_status)}`} />
+                              <Badge variant="outline" className={statusBadgeClass(sample.current_status)}>
+                                {sample.current_status}
+                              </Badge>
+                            </span>
+                          ) : (
+                            "-"
                           )}
-                          {canEditStage && (
+                        </td>
+                        <td className="h-12 px-2 align-middle">
+                          {sample.current_stage ? (
+                            <Badge variant="secondary">{sample.current_stage}</Badge>
+                          ) : (
+                            "-"
+                          )}
+                        </td>
+                        <td className="h-12 px-2 align-middle text-right" data-actions>
+                          <div className="flex justify-end gap-1" data-actions>
                             <Button
                               variant="ghost"
                               size="icon-xs"
-                              aria-label="Edit stage"
+                              aria-label="View"
                               type="button"
                               onClick={(e) => {
                                 e.preventDefault()
                                 e.stopPropagation()
-                                navigate(`/samples/${sample.id}/stage-edit`)
+                                navigate(`/samples/${sample.id}`)
                               }}
                             >
-                              <FileEdit className="h-4 w-4" />
+                              <Eye className="h-4 w-4" />
                             </Button>
-                          )}
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
+                            {canEdit && (
+                              <button
+                                type="button"
+                                aria-label="Edit sample"
+                                className="inline-flex size-6 items-center justify-center rounded-md hover:bg-accent hover:text-accent-foreground [&_svg]:size-3"
+                                onMouseDown={(e) => {
+                                  e.preventDefault()
+                                  e.stopPropagation()
+                                }}
+                                onClick={(e) => {
+                                  e.preventDefault()
+                                  e.stopPropagation()
+                                  setEditingSampleId(sample.id)
+                                }}
+                              >
+                                <Edit className="h-4 w-4" />
+                              </button>
+                            )}
+                            {canEditStage && (
+                              <Button
+                                variant="ghost"
+                                size="icon-xs"
+                                aria-label="Edit stage"
+                                type="button"
+                                onClick={(e) => {
+                                  e.preventDefault()
+                                  e.stopPropagation()
+                                  navigate(`/samples/${sample.id}/stage-edit`)
+                                }}
+                              >
+                                <FileEdit className="h-4 w-4" />
+                              </Button>
+                            )}
+                            {canEdit && (
+                              <Button
+                                variant="ghost"
+                                size="icon-xs"
+                                aria-label="Delete sample"
+                                type="button"
+                                onClick={(e) => {
+                                  e.preventDefault()
+                                  e.stopPropagation()
+                                  openDeleteSample(sample)
+                                }}
+                              >
+                                <Trash2 className="h-4 w-4 text-destructive" />
+                              </Button>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
 
               {totalPages > 1 && (
                 <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -965,6 +1146,40 @@ export default function SamplesListPage() {
             >
               {editSaving ? "Saving..." : "Save & move to next stage"}
             </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete sample?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will permanently delete {sampleToDelete?.style_number ? `sample ${sampleToDelete.style_number}` : "this sample"}.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={onDeleteSample} disabled={deleting}>
+              {deleting ? "Deleting..." : "Delete"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={bulkDeleteOpen} onOpenChange={setBulkDeleteOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete selected samples?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will permanently delete {selectedSampleIds.size} selected sample{selectedSampleIds.size !== 1 ? "s" : ""}.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={onBulkDeleteSamples} disabled={deleting || selectedSampleIds.size === 0}>
+              {deleting ? "Deleting..." : "Delete Selected"}
+            </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

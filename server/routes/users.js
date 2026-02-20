@@ -1,14 +1,14 @@
 import express from 'express';
 import * as ctrl from '../controllers/usersController.js';
 import { authenticate } from '../middleware/auth.js';
-import { requireAdmin } from '../middleware/rbac.js';
+import { requireFeatureRead, requireFeatureWrite } from '../middleware/rbac.js';
 
 const router = express.Router();
 
-router.use(authenticate, requireAdmin);
-router.get('/', ctrl.list);
-router.get('/:id', ctrl.getOne);
-router.post('/', ctrl.create);
-router.put('/:id', ctrl.update);
-router.delete('/:id', ctrl.remove);
+router.use(authenticate);
+router.get('/', requireFeatureRead('USERS'), ctrl.list);
+router.get('/:id', requireFeatureRead('USERS'), ctrl.getOne);
+router.post('/', requireFeatureWrite('USERS'), ctrl.create);
+router.put('/:id', requireFeatureWrite('USERS'), ctrl.update);
+router.delete('/:id', requireFeatureWrite('USERS'), ctrl.remove);
 export default router;
