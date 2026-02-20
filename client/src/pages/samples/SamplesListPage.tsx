@@ -151,7 +151,9 @@ function statusDotClass(status: string | null | undefined): string {
   if (s.includes("delay") || s.includes("late") || s.includes("blocked") || s.includes("hold")) return "bg-red-500"
   if (s.includes("pending") || s.includes("waiting") || s.includes("review")) return "bg-amber-500"
   if (s.includes("progress") || s.includes("development") || s.includes("active")) return "bg-blue-500"
-  if (s.includes("complete") || s.includes("done") || s.includes("delivered") || s.includes("approved")) return "bg-emerald-500"
+  if (s.includes("delivered")) return "bg-sky-500"
+  if (s.includes("complete") || s.includes("done")) return "bg-emerald-500"
+  if (s.includes("approved")) return "bg-emerald-500"
   return paletteForStatus(status).dot
 }
 
@@ -161,8 +163,24 @@ function statusBadgeClass(status: string | null | undefined): string {
   if (s.includes("delay") || s.includes("late") || s.includes("blocked") || s.includes("hold")) return "border-red-200 text-red-700 dark:border-red-900/40 dark:text-red-300"
   if (s.includes("pending") || s.includes("waiting") || s.includes("review")) return "border-amber-200 text-amber-700 dark:border-amber-900/40 dark:text-amber-300"
   if (s.includes("progress") || s.includes("development") || s.includes("active")) return "border-blue-200 text-blue-700 dark:border-blue-900/40 dark:text-blue-300"
-  if (s.includes("complete") || s.includes("done") || s.includes("delivered") || s.includes("approved")) return "border-emerald-200 text-emerald-700 dark:border-emerald-900/40 dark:text-emerald-300"
+  if (s.includes("delivered")) return "border-sky-200 text-sky-700 dark:border-sky-900/40 dark:text-sky-300"
+  if (s.includes("complete") || s.includes("done")) return "border-emerald-200 text-emerald-700 dark:border-emerald-900/40 dark:text-emerald-300"
+  if (s.includes("approved")) return "border-emerald-200 text-emerald-700 dark:border-emerald-900/40 dark:text-emerald-300"
   return paletteForStatus(status).badge
+}
+
+function formatStatusDisplay(status: string | null | undefined, stage: string | null | undefined): string {
+  if (!status) return "-"
+  if (status === "PROCESSING" && stage) {
+    const stageLabel = STAGE_LABELS[stage] || stage
+    return `Processing / ${stageLabel}`
+  }
+  return status
+}
+
+function formatStageDisplay(stage: string | null | undefined): string {
+  if (!stage) return "-"
+  return STAGE_LABELS[stage] || stage
 }
 
 export default function SamplesListPage() {
@@ -592,7 +610,7 @@ export default function SamplesListPage() {
                       <SelectItem value="all">All Seasons</SelectItem>
                       {lookups.seasons.map((season) => (
                         <SelectItem key={season.id} value={season.id.toString()}>
-                          {season.name} {season.year}
+                          {season.code} {season.year}
                         </SelectItem>
                       ))}
                     </SelectContent>
@@ -751,7 +769,7 @@ export default function SamplesListPage() {
                         <td className="h-12 px-2 align-middle">{sample.style_name || "-"}</td>
                         <td className="h-12 px-2 align-middle">{sample.color || "-"}</td>
                         <td className="h-12 px-2 align-middle">
-                          {sample.seasons ? `${sample.seasons.name} ${sample.seasons.year}` : "-"}
+                          {sample.seasons ? `${sample.seasons.code || sample.seasons.name} ${sample.seasons.year}` : "-"}
                         </td>
                         <td className="h-12 px-2 align-middle">{sample.brands?.name || "-"}</td>
                         <td className="h-12 px-2 align-middle">{sample.division || "-"}</td>
@@ -761,7 +779,7 @@ export default function SamplesListPage() {
                             <span className="inline-flex items-center gap-2">
                               <span className={`h-2.5 w-2.5 rounded-full ${statusDotClass(sample.current_status)}`} />
                               <Badge variant="outline" className={statusBadgeClass(sample.current_status)}>
-                                {sample.current_status}
+                                {formatStatusDisplay(sample.current_status, sample.current_stage)}
                               </Badge>
                             </span>
                           ) : (
@@ -770,7 +788,7 @@ export default function SamplesListPage() {
                         </td>
                         <td className="h-12 px-2 align-middle">
                           {sample.current_stage ? (
-                            <Badge variant="secondary">{sample.current_stage}</Badge>
+                            <Badge variant="secondary">{formatStageDisplay(sample.current_stage)}</Badge>
                           ) : (
                             "-"
                           )}
@@ -962,7 +980,7 @@ export default function SamplesListPage() {
                     <SelectContent>
                       {lookups.seasons.map((s) => (
                         <SelectItem key={s.id} value={String(s.id)}>
-                          {s.name} {s.year}
+                          {s.code} {s.year}
                         </SelectItem>
                       ))}
                     </SelectContent>
@@ -1050,14 +1068,24 @@ export default function SamplesListPage() {
                 </div>
                 <div className="space-y-1.5 sm:col-span-2">
                   <Label className="text-xs">Current status</Label>
-                  <Input
-                    placeholder="e.g. In Development"
-                    value={editFormData.current_status ?? ""}
-                    onChange={(e) =>
-                      setEditFormData({ ...editFormData, current_status: e.target.value })
+                  <Select
+                    value={editFormData.current_status ?? "none"}
+                    onValueChange={(v) =>
+                      setEditFormData({ ...editFormData, current_status: v === "none" ? "" : v })
                     }
-                    className="h-8 text-sm"
-                  />
+                  >
+                    <SelectTrigger className="h-8 text-sm">
+                      <SelectValue placeholder="Select status" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">— Clear —</SelectItem>
+                      {availableStatuses.map((status) => (
+                        <SelectItem key={status} value={status}>
+                          {status}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
                 <div className="space-y-1.5 sm:col-span-2">
                   <Label className="text-xs">Current stage</Label>

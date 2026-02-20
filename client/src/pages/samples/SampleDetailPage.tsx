@@ -97,6 +97,30 @@ function currentStageIndex(stage: string | null | undefined): number {
   return idx === -1 ? 0 : idx
 }
 
+function formatStatusDisplay(status: string | null | undefined, stage: string | null | undefined): string {
+  if (!status) return "-"
+  if (status === "PROCESSING" && stage) {
+    const stageStep = stageSteps.find((s) => s.key.toLowerCase() === stage.toLowerCase())
+    const stageName = stageStep?.name || stage
+    return `Processing / ${stageName}`
+  }
+  return status
+}
+
+const STAGE_LABELS: Record<string, string> = {
+  [STAGES.PSI]: "Product / Business Dev (PSI)",
+  [STAGES.SAMPLE_DEVELOPMENT]: "Sample Development",
+  [STAGES.PC_REVIEW]: "PC Review",
+  [STAGES.COSTING]: "Costing",
+  [STAGES.SCF]: "SCF",
+  [STAGES.SHIPMENT_TO_BRAND]: "Shipment to Brand",
+}
+
+function formatStageDisplay(stage: string | null | undefined): string {
+  if (!stage) return "-"
+  return STAGE_LABELS[stage] || stage
+}
+
 export default function SampleDetailPage() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
@@ -288,7 +312,7 @@ export default function SampleDetailPage() {
               <div className="text-xs font-medium text-muted-foreground mb-1">Status</div>
               {sample.current_status ? (
                 <Badge variant="outline" className={`${getStatusColor(sample.current_status)} text-white border-0`}>
-                  {sample.current_status}
+                  {formatStatusDisplay(sample.current_status, sample.current_stage)}
                 </Badge>
               ) : (
                 <span className="text-sm">-</span>
@@ -297,7 +321,7 @@ export default function SampleDetailPage() {
             <div>
               <div className="text-xs font-medium text-muted-foreground mb-1">Stage</div>
               {sample.current_stage ? (
-                <Badge variant="secondary">{sample.current_stage}</Badge>
+                <Badge variant="secondary">{formatStageDisplay(sample.current_stage)}</Badge>
               ) : (
                 <span className="text-sm">-</span>
               )}
@@ -354,7 +378,7 @@ export default function SampleDetailPage() {
             <div className="space-y-2">
               <div className="flex justify-between text-sm">
                 <span className="text-muted-foreground">Season</span>
-                <span className="font-medium">{sample.seasons ? (sample.seasons.name || sample.seasons.code) : "-"} {sample.seasons?.year}</span>
+                <span className="font-medium">{sample.seasons ? (sample.seasons.code || sample.seasons.name) : "-"} {sample.seasons?.year}</span>
               </div>
               <div className="flex justify-between text-sm">
                 <span className="text-muted-foreground">Brand</span>

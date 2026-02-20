@@ -1,0 +1,20 @@
+{
+  "name": "m88-dev-tracker",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mhrk404/m88-dev-tracker.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/mhrk404/m88-dev-tracker/issues"
+  },
+  "homepage": "https://github.com/mhrk404/m88-dev-tracker#readme",
+  "description": ""
+}

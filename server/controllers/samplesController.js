@@ -310,7 +310,7 @@ export const create = async (req, res) => {
       additional_notes: additional_notes?.trim() || null,
       key_date: key_date || null,
       current_stage: 'PSI',
-      current_status: 'INITIATED',
+      current_status: 'PENDING',
       created_by: createdBy,
     };
 

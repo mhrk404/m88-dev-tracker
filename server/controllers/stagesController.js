@@ -78,6 +78,14 @@ export const updateStage = async (req, res) => {
       console.log('[DEBUG] Inserted record:', JSON.stringify(inserted, null, 2));
     }
 
+    // Update sample_request current_status to PROCESSING when a stage is touched
+    const { error: statusErr } = await supabase
+      .from('sample_request')
+      .update({ current_status: 'PROCESSING' })
+      .eq('sample_id', sampleId)
+      .eq('current_status', 'PENDING'); // Only update if still PENDING
+    if (statusErr) console.error('Failed to update sample status to PROCESSING:', statusErr);
+
     try {
       await supabase.from('stage_audit_log').insert({
         sample_id: sampleId,
