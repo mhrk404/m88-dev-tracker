@@ -10,6 +10,7 @@ const router = express.Router({ mergeParams: true });
 router.use(authenticate);
 router.get('/', requireSampleRead, ctrl.list);
 router.get('/:sampleId/full', requireSampleRead, ctrl.getFull);
+router.get('/:sampleId/shipment', requireSampleRead, ctrl.getShipment);
 router.get('/:sampleId', requireSampleRead, ctrl.getOne);
 router.post('/', requireSampleCreate, ctrl.create);
 router.put('/:sampleId', requireSampleUpdate, ctrl.update);

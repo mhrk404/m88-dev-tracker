@@ -27,15 +27,14 @@ function computeLeadTime(kickoff: string | undefined, due: string | undefined) {
   const dd = Date.parse(due)
   if (!Number.isFinite(kd) || !Number.isFinite(dd)) return undefined
   const days = Math.ceil((dd - kd) / (1000 * 60 * 60 * 24))
-  const weeks = Math.ceil(days / 7)
-  return weeks > 0 ? weeks : 0
+  return days > 0 ? days : 0
 }
 
-function classifyLeadTime(weeks: number | undefined | null): "STND" | "RUSH" | undefined {
-  if (weeks == null) return undefined
-  if (weeks === 0) return undefined
-  if (weeks > 17) return "STND"
-  if (weeks >= 1 && weeks <= 17) return "RUSH"
+function classifyLeadTime(days: number | undefined | null): "STND" | "RUSH" | undefined {
+  if (days == null) return undefined
+  if (days === 0) return undefined
+  if (days > 119) return "STND"
+  if (days >= 1 && days <= 119) return "RUSH"
   return undefined
 }
 
@@ -64,7 +63,7 @@ export default function SampleCreatePage() {
     kickoff_date: "",
     sample_due_denver: "",
     requested_lead_time: undefined,
-    lead_time_type: "Weeks",
+    lead_time_type: "Days",
     ref_from_m88: "No",
     ref_sample_to_fty: "No",
     additional_notes: "",
@@ -147,7 +146,7 @@ export default function SampleCreatePage() {
         kickoff_date: formData.kickoff_date || null,
         sample_due_denver: formData.sample_due_denver || null,
         requested_lead_time: formData.requested_lead_time != null ? formData.requested_lead_time : null,
-        lead_time_type: formData.lead_time_type || "Weeks",
+        lead_time_type: formData.lead_time_type || "Days",
         
         ref_from_m88: formData.ref_from_m88,
         ref_sample_to_fty: formData.ref_sample_to_fty,

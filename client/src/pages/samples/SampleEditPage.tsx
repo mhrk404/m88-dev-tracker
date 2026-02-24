@@ -514,7 +514,7 @@ export default function SampleEditPage() {
                   )}
                 </div>
                 <div className="space-y-1.5">
-                  <Label htmlFor="requested_lead_time" className="text-xs">Lead Time</Label>
+                  <Label htmlFor="requested_lead_time" className="text-xs">Lead Time (Days)</Label>
                   <Input
                     id="requested_lead_time"
                     type="number"

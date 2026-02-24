@@ -178,13 +178,17 @@ function statusBadgeClass(status: string | null | undefined): string {
   return paletteForStatus(status).badge
 }
 
-function formatStatusDisplay(status: string | null | undefined, stage: string | null | undefined): string {
+function simplifyStatus(status: string | null | undefined): string {
   if (!status) return "-"
-  if (status === "PROCESSING" && stage) {
-    const stageLabel = STAGE_LABELS[stage] || stage
-    return `Processing / ${stageLabel}`
-  }
-  return status
+  const s = normalizeStatus(status)
+  if (s.includes("deliver")) return "Delivered"
+  if (s.includes("complete") || s.includes("done") || s.includes("approve")) return "Completed"
+  if (s.includes("pending") || s.includes("waiting") || s.includes("review")) return "Pending"
+  return "Processing"
+}
+
+function formatStatusDisplay(status: string | null | undefined): string {
+  return simplifyStatus(status)
 }
 
 function formatStageDisplay(stage: string | null | undefined): string {
@@ -369,7 +373,7 @@ export default function SamplesListPage() {
   const availableStatuses = useMemo(() => {
     const set = new Set<string>()
     for (const s of samples) {
-      if (s.current_status && s.current_status.trim()) set.add(s.current_status.trim())
+      if (s.current_status && s.current_status.trim()) set.add(simplifyStatus(s.current_status))
     }
     return Array.from(set).sort((a, b) => a.localeCompare(b))
   }, [samples])
@@ -440,7 +444,7 @@ export default function SamplesListPage() {
 
     const matchesStatus =
       statusFilter === "all" ||
-      (sample.current_status?.trim() || "") === statusFilter
+      simplifyStatus(sample.current_status) === statusFilter
 
     return matchesQuery && matchesStatus
   })
@@ -854,9 +858,9 @@ export default function SamplesListPage() {
                         <td className="h-12 px-2 align-middle">
                           {sample.current_status ? (
                             <span className="inline-flex items-center gap-2">
-                              <span className={`h-2.5 w-2.5 rounded-full ${statusDotClass(sample.current_status)}`} />
-                              <Badge variant="outline" className={statusBadgeClass(sample.current_status)}>
-                                {formatStatusDisplay(sample.current_status, sample.current_stage)}
+                              <span className={`h-2.5 w-2.5 rounded-full ${statusDotClass(formatStatusDisplay(sample.current_status))}`} />
+                              <Badge variant="outline" className={statusBadgeClass(formatStatusDisplay(sample.current_status))}>
+                                {formatStatusDisplay(sample.current_status)}
                               </Badge>
                             </span>
                           ) : (

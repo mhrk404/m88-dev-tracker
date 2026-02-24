@@ -1,7 +1,19 @@
 import { useEffect, useState } from "react"
 import { useParams, useNavigate, Link } from "react-router-dom"
-import { Edit, ChevronDown, FileEdit } from "lucide-react"
+import {
+  Edit,
+  ChevronDown,
+  FileEdit,
+  CircleDot,
+  ClipboardList,
+  FlaskConical,
+  MessageSquareWarning,
+  Calculator,
+  Truck,
+  PackageCheck,
+} from "lucide-react"
 import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import {
@@ -9,6 +21,8 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
+  DialogDescription,
+  DialogFooter,
 } from "@/components/ui/dialog"
 import { DetailSkeleton } from "@/components/ui/skeletons"
 import {
@@ -20,7 +34,7 @@ import {
   BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb"
 import { STAGES } from "@/lib/constants"
-import { getSampleFull } from "@/api/samples"
+import { getSampleFull, updateSample } from "@/api/samples"
 import type { SampleFull, StageData } from "@/types/sample"
 import { useAuth } from "@/contexts/auth"
 import { canEditSample, stageForRole } from "@/lib/rbac"
@@ -36,13 +50,16 @@ import {
 } from "@/components/ui/table"
 import { cn } from "@/lib/utils"
 import { getStatusColor } from "@/lib/statusColors"
+import { fetchShipmentByTracking, type ShipmentLookupResult } from "@/api/shipping"
+import { updateStage } from "@/api/stages"
 
 const stageSteps = [
-  { key: STAGES.PSI, label: "PSI", name: "PSI Intake (Business Development)" },
-  { key: STAGES.SAMPLE_DEVELOPMENT, label: "DEV", name: "Factory Development Updates" },
-  { key: STAGES.PC_REVIEW, label: "PC", name: "MD / Product Review Decision" },
-  { key: STAGES.COSTING, label: "COST", name: "Cost Sheet Processing" },
-  { key: STAGES.SHIPMENT_TO_BRAND, label: "SHIP", name: "Brand Delivery Tracking" },
+  { key: STAGES.PSI, label: "PSI", name: "PSI Intake (Business Development)", icon: ClipboardList },
+  { key: STAGES.SAMPLE_DEVELOPMENT, label: "DEV", name: "Factory Development Updates", icon: FlaskConical },
+  { key: STAGES.PC_REVIEW, label: "PC", name: "MD / Product Review Decision", icon: MessageSquareWarning },
+  { key: STAGES.COSTING, label: "COST", name: "Cost Sheet Processing", icon: Calculator },
+  { key: STAGES.SHIPMENT_TO_BRAND, label: "SHIP", name: "Brand Delivery Tracking", icon: Truck },
+  { key: STAGES.DELIVERED_CONFIRMATION, label: "DLV", name: "Delivered Confirmation", icon: PackageCheck },
 ] as const
 
 type StepKey = (typeof stageSteps)[number]["key"]
@@ -100,6 +117,17 @@ function currentStageIndex(stage: string | null | undefined): number {
   const normalizedStage = stage.toLowerCase()
   const idx = stageSteps.findIndex((s) => s.key.toLowerCase() === normalizedStage)
   return idx === -1 ? 0 : idx
+}
+
+function effectiveStageIndex(stage: string | null | undefined, status: string | null | undefined): number {
+  const normalizedStatus = (status || "").trim().toUpperCase()
+  if (normalizedStatus === "COMPLETED" || normalizedStatus === "DELIVERED") {
+    return stageSteps.findIndex((s) => s.key === STAGES.DELIVERED_CONFIRMATION)
+  }
+  if (normalizedStatus === "CANCELLED") {
+    return stageSteps.length - 1
+  }
+  return currentStageIndex(stage)
 }
 
 function formatStatusDisplay(status: string | null | undefined, stage: string | null | undefined): string {
@@ -220,6 +248,12 @@ export default function SampleDetailPage() {
   const [sample, setSample] = useState<SampleFull | null>(null)
   const [loading, setLoading] = useState(true)
   const [selectedMilestone, setSelectedMilestone] = useState<StepKey | null>(null)
+  const [shipmentTrackerOpen, setShipmentTrackerOpen] = useState(false)
+  const [shipmentSaving, setShipmentSaving] = useState(false)
+  const [trackingInput, setTrackingInput] = useState("")
+  const [shipmentFetching, setShipmentFetching] = useState(false)
+  const [shipmentLookup, setShipmentLookup] = useState<ShipmentLookupResult | null>(null)
+  const [actualSampleSentDate, setActualSampleSentDate] = useState("")
 
   useEffect(() => {
     if (!id) return
@@ -266,12 +300,7 @@ export default function SampleDetailPage() {
     )
   }
 
-  const stageIdx = currentStageIndex(sample.current_stage)
-  // Heuristic: if status is DELIVERED or CANCELLED, show it at the end regardless of current_stage
-  const s = (sample.current_status || "").toUpperCase()
-  const effectiveStageIdx = (s === "DELIVERED" || s === "CANCELLED")
-    ? stageSteps.length - 1
-    : stageIdx
+  const effectiveStageIdx = effectiveStageIndex(sample.current_stage, sample.current_status)
 
   const progressPct =
     stageSteps.length > 1 ? (effectiveStageIdx / (stageSteps.length - 1)) * 100 : 0
@@ -286,15 +315,17 @@ export default function SampleDetailPage() {
   const scf = (sample.stages as Record<string, StageData | null | undefined>)?.scf ?? null
 
   const requestedLeadTime = sample.requested_lead_time ?? dayDiffSafe(sample.kickoff_date, sample.sample_due_denver)
-  const requestedLeadBucket = sample.lead_time_type || (requestedLeadTime != null
-    ? requestedLeadTime <= 7
-      ? "1 Week or Less"
-      : requestedLeadTime <= 14
-        ? "2 Weeks"
-        : requestedLeadTime <= 21
-          ? "3 Weeks"
-          : "4+ Weeks"
-    : "-")
+  // Excel logic: =IF(AZ14=0," ",IF(AZ14>17,"STND", IF(AND(AZ14>=1,AZ14<=17),"RUSH")))
+  let requestedLeadBucket = " "
+  if (requestedLeadTime != null) {
+    if (requestedLeadTime === 0) {
+      requestedLeadBucket = " "
+    } else if (requestedLeadTime > 17) {
+      requestedLeadBucket = "STND"
+    } else if (requestedLeadTime >= 1 && requestedLeadTime <= 17) {
+      requestedLeadBucket = "RUSH"
+    }
+  }
   const psiSentDate = (psi?.sent_date as string | undefined) ?? null
   const actualShipDate = (dev?.actual_send as string | undefined) ?? null
   const targetXfactory = (dev?.target_xfty as string | undefined) ?? null
@@ -303,7 +334,63 @@ export default function SampleDetailPage() {
   const estimateCostingDue = addDays(actualShipDate, 2)
   const estimateXfactoryForDen = requestedLeadTime != null ? subtractDays(sample.sample_due_denver, requestedLeadTime) : null
   const awbValue = (ship?.awb_number as string | undefined) || (dev?.awb as string | undefined) || ""
+  const hasShipmentData =
+    (sample.shipping?.length ?? 0) > 0 ||
+    !!awbValue ||
+    !!(ship?.sent_date as string | undefined) ||
+    !!(ship?.sample_sent_brand_date as string | undefined) ||
+    !!(ship?.awb_to_brand as string | undefined)
   const hasReject = normalizeRejectFlag(pc?.reject_status) || normalizeRejectFlag(pc?.reject_by_md)
+
+  async function saveShipmentTracker() {
+    if (!sample || !id) return
+
+    if (!actualSampleSentDate) {
+      toast.error("Actual Sample Sent to Brand date is required")
+      return
+    }
+
+    setShipmentSaving(true)
+    try {
+      await updateStage(id, STAGES.SHIPMENT_TO_BRAND, {
+        sent_date: actualSampleSentDate,
+        sample_sent_brand_date: actualSampleSentDate,
+      })
+
+      await updateSample(id, {
+        key_date: actualSampleSentDate,
+        current_stage: STAGES.DELIVERED_CONFIRMATION,
+      })
+
+      const refreshed = await getSampleFull(id)
+      setSample(refreshed)
+      setShipmentTrackerOpen(false)
+      toast.success("Marked as delivered")
+    } catch (error: unknown) {
+      const err = error as { response?: { data?: { error?: string } } }
+      toast.error(err?.response?.data?.error || "Failed to mark as delivered")
+    } finally {
+      setShipmentSaving(false)
+    }
+  }
+
+  async function fetchShipmentFromApi() {
+    if (!id) return
+    setShipmentFetching(true)
+    try {
+      const data = await fetchShipmentByTracking(id, trackingInput)
+      setShipmentLookup(data)
+      if (!trackingInput.trim() && data.awb) {
+        setTrackingInput(data.awb)
+      }
+      toast.success("Shipment fetched")
+    } catch (error: unknown) {
+      const err = error as { response?: { data?: { error?: string } } }
+      toast.error(err?.response?.data?.error || "Failed to fetch shipment")
+    } finally {
+      setShipmentFetching(false)
+    }
+  }
 
   const additionalRows: Array<{ label: string; value: string }> = [
     { label: "PBD", value: assignment?.pbd?.full_name || "-" },
@@ -353,15 +440,14 @@ export default function SampleDetailPage() {
   const MS_PER_DAY = 1000 * 60 * 60 * 24
   const kickoffMs = sample.kickoff_date ? Date.parse(sample.kickoff_date) : null
   const dueMs = sample.sample_due_denver ? Date.parse(sample.sample_due_denver) : null
-  let calcWeeks: number | null = null
+  let calcDays: number | null = null
   let calcClass: string | null = null
   if (kickoffMs && dueMs && Number.isFinite(kickoffMs) && Number.isFinite(dueMs)) {
     const days = Math.ceil((dueMs - kickoffMs) / MS_PER_DAY)
-    const weeks = Math.ceil(days / 7)
-    calcWeeks = weeks
-    if (weeks === 0) calcClass = null
-    else if (weeks > 17) calcClass = 'STND'
-    else if (weeks >= 1 && weeks <= 17) calcClass = 'RUSH'
+    calcDays = days
+    if (days === 0) calcClass = null
+    else if (days > 119) calcClass = 'STND'
+    else if (days >= 1 && days <= 119) calcClass = 'RUSH'
     else calcClass = null
   }
 
@@ -391,6 +477,22 @@ export default function SampleDetailPage() {
             </Breadcrumb>
           </div>
           <div className="flex items-center gap-1">
+            {hasShipmentData && canEditStage && (
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setTrackingInput(awbValue || "")
+                  setShipmentLookup(null)
+                  setActualSampleSentDate(
+                    String((ship?.sample_sent_brand_date as string | undefined) || (ship?.sent_date as string | undefined) || "")
+                  )
+                  setShipmentTrackerOpen(true)
+                }}
+                size="sm"
+              >
+                Shipment Tracker
+              </Button>
+            )}
             {canEditStage && (
               <Button
                 variant="outline"
@@ -419,7 +521,7 @@ export default function SampleDetailPage() {
         <DialogContent className="max-w-md">
           {selectedMilestone && sample && (() => {
             const step = stageSteps.find((s) => s.key === selectedMilestone)!
-            const stageData = sample.stages[selectedMilestone] as StageData | null
+            const stageData = (sample.stages as Record<string, StageData | null | undefined>)[selectedMilestone] ?? null
             const idx = stageSteps.findIndex((s) => s.key === selectedMilestone)
             const isCompleted = idx < effectiveStageIdx
             const isCurrent = idx === effectiveStageIdx
@@ -463,6 +565,56 @@ export default function SampleDetailPage() {
               </>
             )
           })()}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={shipmentTrackerOpen} onOpenChange={setShipmentTrackerOpen}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Shipment Tracker</DialogTitle>
+            <DialogDescription>
+              Fetch shipment details, then mark this sample as delivered.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-2">
+            <div className="text-xs text-muted-foreground">Tracking / AWB</div>
+            <div className="flex gap-2">
+              <Input
+                value={trackingInput}
+                onChange={(e) => setTrackingInput(e.target.value)}
+                placeholder="Enter AWB or tracking"
+              />
+              <Button type="button" variant="outline" onClick={fetchShipmentFromApi} disabled={shipmentFetching}>
+                {shipmentFetching ? "Fetching..." : "Fetch"}
+              </Button>
+            </div>
+            {shipmentLookup && (
+              <div className="rounded-md border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
+                <div>AWB: <span className="font-medium text-foreground">{shipmentLookup.awb || "-"}</span></div>
+                <div>Status: <span className="font-medium text-foreground">{shipmentLookup.status || "-"}</span></div>
+                <div>Sent Date: <span className="font-medium text-foreground">{shipmentLookup.sent_date || "-"}</span></div>
+              </div>
+            )}
+          </div>
+
+          <div className="space-y-2">
+            <div className="text-xs text-muted-foreground">Actual Sample Sent to Brand</div>
+            <Input
+              type="date"
+              value={actualSampleSentDate}
+              onChange={(e) => setActualSampleSentDate(e.target.value)}
+            />
+          </div>
+
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setShipmentTrackerOpen(false)} disabled={shipmentSaving}>
+              Cancel
+            </Button>
+            <Button type="button" onClick={saveShipmentTracker} disabled={shipmentSaving}>
+              {shipmentSaving ? "Saving..." : "Mark as Delivered"}
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 
@@ -578,10 +730,10 @@ export default function SampleDetailPage() {
               <div className="flex justify-between text-sm">
                 <span className="text-muted-foreground">Lead Time</span>
                 <span className="font-medium">
-                  {calcWeeks != null ? (
-                    calcWeeks === 0 ? "-" : `${calcWeeks} wk`
+                  {calcDays != null ? (
+                    calcDays === 0 ? "-" : `${calcDays} day${calcDays === 1 ? "" : "s"}`
                   ) : sample.requested_lead_time != null ? (
-                    sample.requested_lead_time === 0 ? "-" : `${sample.requested_lead_time}`
+                    sample.requested_lead_time === 0 ? "-" : `${sample.requested_lead_time} day${sample.requested_lead_time === 1 ? "" : "s"}`
                   ) : (
                     "-"
                   )}
@@ -589,7 +741,7 @@ export default function SampleDetailPage() {
               </div>
               <div className="flex justify-between text-sm">
                 <span className="text-muted-foreground">Type</span>
-                <span className="font-medium">{(calcWeeks != null ? (calcClass || '-') : (sample.lead_time_type || '-'))}</span>
+                <span className="font-medium">{(calcDays != null ? (calcClass || '-') : (sample.lead_time_type || '-'))}</span>
               </div>
               <div className="flex justify-between text-sm">
                 <span className="text-muted-foreground">Ref from M88?</span>
@@ -631,20 +783,21 @@ export default function SampleDetailPage() {
                 "absolute left-3 top-7 hidden h-px md:block transition-colors duration-500",
                 currentStatusColor === "bg-rose-500" ? "bg-rose-500/50" : "bg-emerald-500/50"
               )}
-              style={{ width: `calc(${progressPct}% - 12px)` }}
+              style={{ width: `${progressPct}%` }}
             />
 
             <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between md:gap-1.5">
               {stageSteps.map((step, idx) => {
                 const isCompleted = idx < effectiveStageIdx
                 const isCurrent = idx === effectiveStageIdx
+                const StepIcon = step.icon
                 const dotClass = isCompleted
                   ? "bg-emerald-500"
                   : isCurrent
                     ? currentStatusColor
                     : "bg-muted-foreground/40"
 
-                const stageData = sample.stages[step.key] as StageData | null
+                const stageData = (sample.stages as Record<string, StageData | null | undefined>)[step.key] ?? null
                 const isVerified = stageData?.is_checked === true || stageData?.is_checked === "true"
 
                 return (
@@ -670,7 +823,16 @@ export default function SampleDetailPage() {
                       )}
                     </div>
                     <div className="min-w-0 flex-1 md:flex-initial">
-                      <div className="text-xs font-semibold text-foreground">{step.label}</div>
+                      <div className="text-xs font-semibold text-foreground inline-flex items-center gap-1.5">
+                        <StepIcon className="h-3.5 w-3.5" />
+                        <span>{step.label}</span>
+                        {isCurrent && (
+                          <Badge variant="default" className="h-4 px-1.5 text-[10px] leading-none">
+                            <CircleDot className="mr-1 h-2.5 w-2.5" />
+                            Current
+                          </Badge>
+                        )}
+                      </div>
                       <div className="text-xs text-muted-foreground">{step.name}</div>
                     </div>
                     <ChevronDown className="h-3.5 w-3.5 text-muted-foreground shrink-0 md:mt-0.5" aria-hidden />
@@ -688,22 +850,16 @@ export default function SampleDetailPage() {
           <CardDescription className="text-xs">Export-aligned fields (shown once, no duplicates)</CardDescription>
         </CardHeader>
         <CardContent>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead className="h-9 w-[45%]">Field</TableHead>
-                <TableHead className="h-9">Value</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
+          <div className="max-h-80 overflow-y-auto pr-1">
+            <div className="grid gap-2 sm:grid-cols-2">
               {additionalRows.map((row) => (
-                <TableRow key={row.label}>
-                  <TableCell className="py-2 text-muted-foreground">{row.label}</TableCell>
-                  <TableCell className="py-2 font-medium">{row.value || "-"}</TableCell>
-                </TableRow>
+                <div key={row.label} className="rounded-md border bg-muted/20 px-3 py-2">
+                  <div className="text-[11px] uppercase tracking-wide text-muted-foreground">{row.label}</div>
+                  <div className="mt-1 text-sm font-medium break-words">{row.value || "-"}</div>
+                </div>
               ))}
-            </TableBody>
-          </Table>
+            </div>
+          </div>
         </CardContent>
       </Card>
 

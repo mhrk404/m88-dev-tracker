@@ -276,6 +276,57 @@ export const getFull = async (req, res) => {
   }
 };
 
+export const getShipment = async (req, res) => {
+  try {
+    const { sampleId } = req.params;
+    const trackingInput = String(req.query.awb || '').trim().toLowerCase();
+
+    if (!sampleId || sampleId === 'undefined') {
+      return res.status(400).json({ error: 'Valid sample_id is required' });
+    }
+
+    const { data: sample, error: sampleErr } = await supabase
+      .from('sample_request')
+      .select('sample_id,current_stage')
+      .eq('sample_id', sampleId)
+      .maybeSingle();
+    if (sampleErr) throw sampleErr;
+    if (!sample) return res.status(404).json({ error: 'Sample not found' });
+    if (!canViewSampleForRole(req.user?.roleCode, sample.current_stage)) {
+      return res.status(403).json({ error: 'You can only access samples that are at your stage.' });
+    }
+
+    const { data: shipment, error: shipErr } = await supabase
+      .from('shipment_to_brand')
+      .select('*')
+      .eq('sample_id', sampleId)
+      .maybeSingle();
+    if (shipErr) throw shipErr;
+    if (!shipment) return res.status(404).json({ error: 'No shipment data found for this sample' });
+
+    if (trackingInput) {
+      const awb = String(shipment.awb_number || '').toLowerCase();
+      const awbToBrand = String(shipment.awb_to_brand || '').toLowerCase();
+      const isMatch = awb.includes(trackingInput) || awbToBrand.includes(trackingInput);
+      if (!isMatch) {
+        return res.status(404).json({ error: 'No shipment matched the provided tracking input' });
+      }
+    }
+
+    return res.json({
+      id: shipment.shipment_id,
+      sample_id: shipment.sample_id,
+      awb: shipment.awb_number ?? shipment.awb_to_brand ?? null,
+      status: shipment.stage_status ?? null,
+      sent_date: shipment.sent_date ?? null,
+      data: shipment,
+    });
+  } catch (err) {
+    console.error('samples getShipment:', err);
+    return res.status(500).json({ error: err.message ?? 'Failed to fetch shipment data' });
+  }
+};
+
 export const create = async (req, res) => {
   try {
     const {
@@ -477,6 +528,11 @@ export const update = async (req, res) => {
     const nextStage = typeof updates.current_stage === 'string'
       ? updates.current_stage.trim().toLowerCase()
       : updates.current_stage;
+
+    // Business rule: once stage reaches delivered_confirmation, status is completed
+    if (nextStage === 'delivered_confirmation') {
+      updates.current_status = 'COMPLETED';
+    }
 
     if (nextStage && nextStage !== oldStage) {
       updates.sample_status = 'In Progress';
