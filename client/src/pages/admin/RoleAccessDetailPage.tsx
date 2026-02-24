@@ -27,11 +27,10 @@ import {
 
 const STAGE_LABELS: Record<string, string> = {
   PSI: "PSI",
-  SAMPLE_DEVELOPMENT: "Sample Development",
-  PC_REVIEW: "PC Review",
-  COSTING: "Costing",
-  SCF: "SCF",
-  SHIPMENT_TO_BRAND: "Shipment to Brand",
+  SAMPLE_DEVELOPMENT: "Factory Development Updates",
+  PC_REVIEW: "MD / Product Review Decision",
+  COSTING: "Cost Sheet Processing",
+  SHIPMENT_TO_BRAND: "Brand Delivery Tracking",
   USERS: "Users",
   ROLES: "Roles",
   BRANDS: "Brands",

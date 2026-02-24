@@ -4,7 +4,6 @@ import { Pencil, Trash2, X, Copy, Check } from "lucide-react"
 import { toast } from "sonner"
 import { cn } from "@/lib/utils"
 
-import PageBreadcrumbs from "@/components/layout/PageBreadcrumbs"
 import { TableSkeleton } from "@/components/ui/skeletons"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
@@ -65,7 +64,9 @@ import type { Lookups } from "@/types/lookups"
 import type { CreateUserInput, UpdateUserInput, User } from "@/types/user"
 
 type ActiveFilter = "all" | "active" | "inactive"
+type RegionCode = "US" | "PH" | "INDONESIA"
 const USERS_PAGE_SIZE = 10
+const REGION_OPTIONS: RegionCode[] = ["US", "PH", "INDONESIA"]
 
 function isAdministrativeRole(roleCode?: string | null) {
   return roleCode === ROLES.ADMIN || roleCode === ROLES.SUPER_ADMIN
@@ -76,6 +77,7 @@ function emptyCreate(): CreateUserInput {
     username: "",
     email: "",
     full_name: "",
+    region: "US",
     role_id: null,
     is_active: true,
   }
@@ -105,6 +107,7 @@ export default function UsersPage() {
   const [generatedPassword, setGeneratedPassword] = useState<string>("")
   const [copiedPassword, setCopiedPassword] = useState(false)
   const [deleting, setDeleting] = useState(false)
+  const canManageAllRegions = currentUser?.roleCode === ROLES.SUPER_ADMIN
 
   function generatePassword(username: string): string {
     if (!username.trim()) return ""
@@ -154,9 +157,22 @@ export default function UsersPage() {
     }
   }, [searchParams, setSearchParams])
 
+  useEffect(() => {
+    if (createOpen && !canManageAllRegions && currentUser?.region) {
+      setCreateForm((prev) => ({ ...prev, region: currentUser.region as RegionCode }))
+    }
+  }, [createOpen, canManageAllRegions, currentUser?.region])
+
   const filteredUsers = useMemo(() => {
     const q = search.trim().toLowerCase()
     return users.filter((u) => {
+      // STRICT region-based admin visibility: admins can only see admins from their own region
+      if (!canManageAllRegions && isAdministrativeRole(u.roleCode)) {
+        if (u.region !== currentUser?.region) {
+          return false; // Hide admins from other regions
+        }
+      }
+
       const matchesQuery =
         !q ||
         u.username.toLowerCase().includes(q) ||
@@ -174,7 +190,13 @@ export default function UsersPage() {
 
       return matchesQuery && matchesRole && matchesActive
     })
-  }, [users, search, roleFilter, activeFilter])
+  }, [users, search, roleFilter, activeFilter, canManageAllRegions, currentUser?.region])
+
+  const assignableRoles = useMemo(() => {
+    const roles = lookups?.roles ?? []
+    if (canManageAllRegions) return roles
+    return roles.filter((r) => r.code !== ROLES.SUPER_ADMIN)
+  }, [lookups?.roles, canManageAllRegions])
 
   const [page, setPage] = useState(1)
 
@@ -201,6 +223,7 @@ export default function UsersPage() {
       username: u.username,
       email: u.email,
       full_name: u.full_name ?? "",
+      region: u.region,
       role_id: u.role_id ?? null,
       is_active: u.is_active,
     })
@@ -217,6 +240,7 @@ export default function UsersPage() {
         username: createForm.username.trim(),
         email: createForm.email.trim(),
         full_name: createForm.full_name?.trim() || undefined,
+        region: (canManageAllRegions ? createForm.region : currentUser?.region) as RegionCode,
         role_id: createForm.role_id ?? null,
         is_active: createForm.is_active ?? true,
         password: generatedPassword,
@@ -249,6 +273,7 @@ export default function UsersPage() {
         username: editForm.username?.trim(),
         email: editForm.email?.trim(),
         full_name: editForm.full_name?.trim() || undefined,
+        region: (canManageAllRegions ? editForm.region : currentUser?.region) as RegionCode,
       })
       toast.success("User updated")
       setEditOpen(false)
@@ -435,6 +460,7 @@ export default function UsersPage() {
                   ))}
                 </SelectContent>
               </Select>
+
             </div>
           </CardContent>
         </Card>
@@ -489,6 +515,7 @@ export default function UsersPage() {
                       <TableHead>Username</TableHead>
                       <TableHead>Email</TableHead>
                       <TableHead>Name</TableHead>
+                      <TableHead>Region</TableHead>
                       <TableHead>Role</TableHead>
                       <TableHead>Status</TableHead>
                       <TableHead className="text-right">Actions</TableHead>
@@ -527,6 +554,7 @@ export default function UsersPage() {
                         </TableCell>
                         <TableCell>{u.email}</TableCell>
                         <TableCell>{u.full_name || "-"}</TableCell>
+                        <TableCell>{u.region}</TableCell>
                         <TableCell>{u.roleName || u.roleCode || "-"}</TableCell>
                         <TableCell>
                           {u.is_active ? (
@@ -670,9 +698,30 @@ export default function UsersPage() {
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="none">No role</SelectItem>
-                    {lookups?.roles?.map((r) => (
+                    {assignableRoles.map((r) => (
                       <SelectItem key={r.id} value={String(r.id)}>
                         {r.name} ({r.code})
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs" htmlFor="c_region">Region</Label>
+                <Select
+                  value={createForm.region ?? "US"}
+                  onValueChange={(v) =>
+                    setCreateForm((p) => ({ ...p, region: v as RegionCode }))
+                  }
+                  disabled={!canManageAllRegions}
+                >
+                  <SelectTrigger id="c_region" className="h-8 text-sm">
+                    <SelectValue placeholder="Select region" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {REGION_OPTIONS.map((region) => (
+                      <SelectItem key={region} value={region}>
+                        {region}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -784,8 +833,7 @@ export default function UsersPage() {
                       </SelectTrigger>
                       <SelectContent>
                         <SelectItem value="none">No role</SelectItem>
-                        {lookups?.roles
-                          ?.map((r) => (
+                        {assignableRoles.map((r) => (
                             <SelectItem key={r.id} value={String(r.id)}>
                               {r.name} ({r.code})
                             </SelectItem>
@@ -798,6 +846,27 @@ export default function UsersPage() {
                           Admins cannot change the role of super admins.
                         </p>
                       )}
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-xs" htmlFor="e_region">Region</Label>
+                    <Select
+                      value={String(editForm.region ?? editUser?.region ?? "US")}
+                      onValueChange={(v) =>
+                        setEditForm((p) => ({ ...p, region: v as RegionCode }))
+                      }
+                      disabled={!canManageAllRegions}
+                    >
+                      <SelectTrigger id="e_region" className="h-8 text-sm">
+                        <SelectValue placeholder="Select region" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {REGION_OPTIONS.map((region) => (
+                          <SelectItem key={region} value={region}>
+                            {region}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   </div>
                   <div className="space-y-1.5">
                     <Label className="text-xs" htmlFor="e_active">Status</Label>

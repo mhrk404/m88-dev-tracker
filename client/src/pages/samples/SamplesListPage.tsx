@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react"
 import { useNavigate } from "react-router-dom"
-import { Eye, Edit, FileEdit, Download, Trash2, X } from "lucide-react"
+import { Eye, Edit, Download, Trash2, X, ArrowRight } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card, CardContent } from "@/components/ui/card"
@@ -42,9 +42,9 @@ import {
   AlertDialogCancel,
 } from "@/components/ui/alert-dialog"
 import { Label } from "@/components/ui/label"
-import { listSamples, getSample, updateSample, deleteSample } from "@/api/samples"
+import { listSamples, getSampleFull, updateSample, deleteSample } from "@/api/samples"
 import { getLookups } from "@/api/lookups"
-import { exportSamplesCsv } from "@/api/export"
+import { exportSamples, type ExportFormat } from "@/api/export"
 import type { Sample, UpdateSampleInput } from "@/types/sample"
 import type { Lookups } from "@/types/lookups"
 import type { SampleFilters } from "@/types/sample"
@@ -58,21 +58,21 @@ import { paginationRange } from "@/lib/pagination"
 const SAMPLES_PAGE_SIZE = 10
 
 const STAGE_LABELS: Record<string, string> = {
-  [STAGES.PSI]: "Product / Business Dev (PSI)",
-  [STAGES.SAMPLE_DEVELOPMENT]: "Sample Development",
-  [STAGES.PC_REVIEW]: "PC Review",
-  [STAGES.COSTING]: "Costing",
-  [STAGES.SCF]: "SCF",
-  [STAGES.SHIPMENT_TO_BRAND]: "Shipment to Brand",
+  [STAGES.PSI]: "PSI Intake (Business Development)",
+  [STAGES.SAMPLE_DEVELOPMENT]: "Factory Development Updates",
+  [STAGES.PC_REVIEW]: "MD / Product Review Decision",
+  [STAGES.COSTING]: "Cost Sheet Processing",
+  [STAGES.SHIPMENT_TO_BRAND]: "Brand Delivery Tracking",
+  [STAGES.DELIVERED_CONFIRMATION]: "Delivered Confirmation",
 }
 
 const STAGE_OPTIONS = [
-  { value: STAGES.PSI, label: "Product / Business Dev (PSI)" },
-  { value: STAGES.SAMPLE_DEVELOPMENT, label: "Sample Development" },
-  { value: STAGES.PC_REVIEW, label: "PC Review" },
-  { value: STAGES.COSTING, label: "Costing" },
-  { value: STAGES.SCF, label: "SCF" },
-  { value: STAGES.SHIPMENT_TO_BRAND, label: "Shipment to Brand" },
+  { value: STAGES.PSI, label: "PSI Intake (Business Development)" },
+  { value: STAGES.SAMPLE_DEVELOPMENT, label: "Factory Development Updates" },
+  { value: STAGES.PC_REVIEW, label: "MD / Product Review Decision" },
+  { value: STAGES.COSTING, label: "Cost Sheet Processing" },
+  { value: STAGES.SHIPMENT_TO_BRAND, label: "Brand Delivery Tracking" },
+  { value: STAGES.DELIVERED_CONFIRMATION, label: "Delivered Confirmation" },
 ] as const
 
 const STAGE_ORDER: string[] = [
@@ -80,9 +80,18 @@ const STAGE_ORDER: string[] = [
   STAGES.SAMPLE_DEVELOPMENT,
   STAGES.PC_REVIEW,
   STAGES.COSTING,
-  STAGES.SCF,
   STAGES.SHIPMENT_TO_BRAND,
+  STAGES.DELIVERED_CONFIRMATION,
 ]
+
+function isDatePast(dateLike: string | null | undefined): boolean {
+  if (!dateLike) return false
+  const d = new Date(dateLike)
+  if (Number.isNaN(d.getTime())) return false
+  const today = new Date()
+  today.setHours(0, 0, 0, 0)
+  return d.getTime() < today.getTime()
+}
 
 function getNextStage(currentStage: string | null | undefined): string | null {
   if (!currentStage) return STAGE_ORDER[0] ?? null
@@ -190,6 +199,7 @@ export default function SamplesListPage() {
   const [lookups, setLookups] = useState<Lookups | null>(null)
   const [loading, setLoading] = useState(true)
   const [exporting, setExporting] = useState(false)
+  const [exportFormat, setExportFormat] = useState<ExportFormat>("xlsx")
   const [filters, setFilters] = useState<SampleFilters>({})
   const [searchQuery, setSearchQuery] = useState("")
   const [statusFilter, setStatusFilter] = useState<string>("all")
@@ -199,6 +209,7 @@ export default function SamplesListPage() {
   const [editFormLoading, setEditFormLoading] = useState(false)
   const [editSaving, setEditSaving] = useState(false)
   const [showSaveConfirm, setShowSaveConfirm] = useState(false)
+  const [editShipmentEta, setEditShipmentEta] = useState<string | null>(null)
   const [selectedSampleIds, setSelectedSampleIds] = useState<Set<string>>(new Set())
   const [sampleToDelete, setSampleToDelete] = useState<Sample | null>(null)
   const [deleteOpen, setDeleteOpen] = useState(false)
@@ -212,7 +223,7 @@ export default function SamplesListPage() {
   useEffect(() => {
     if (!editingSampleId || !lookups) return
     setEditFormLoading(true)
-    getSample(editingSampleId)
+    getSampleFull(editingSampleId)
       .then((sample) => {
         setEditFormData({
           style_name: sample.style_name || "",
@@ -227,6 +238,8 @@ export default function SamplesListPage() {
           current_status: sample.current_status || "",
           current_stage: sample.current_stage || "",
         })
+        const ship = sample.stages?.shipment_to_brand as Record<string, unknown> | null | undefined
+        setEditShipmentEta((ship?.pkg_eta_denver as string | undefined) ?? null)
       })
       .catch(() => toast.error("Failed to load sample"))
       .finally(() => setEditFormLoading(false))
@@ -255,6 +268,17 @@ export default function SamplesListPage() {
       const next = getNextStage(editFormData.current_stage)
       if (next) currentStage = next
     }
+
+    if (
+      moveToNextStage &&
+      currentStage === STAGES.DELIVERED_CONFIRMATION
+    ) {
+      if (!isDatePast(editShipmentEta)) {
+        toast.error("Delivered confirmation is available only when ETA is already past.")
+        return
+      }
+    }
+
     const payload: UpdateSampleInput = {
       ...editFormData,
       style_name: editFormData.style_name?.trim() || undefined,
@@ -346,6 +370,47 @@ export default function SamplesListPage() {
     const set = new Set<string>()
     for (const s of samples) {
       if (s.current_status && s.current_status.trim()) set.add(s.current_status.trim())
+    }
+    return Array.from(set).sort((a, b) => a.localeCompare(b))
+  }, [samples])
+
+  const availableSeasons = useMemo(() => {
+    const byId = new Map<number, string>()
+    for (const sample of samples) {
+      if (!sample.season_id) continue
+      const label = sample.seasons
+        ? `${sample.seasons.code || sample.seasons.name} ${sample.seasons.year}`
+        : `Season ${sample.season_id}`
+      byId.set(sample.season_id, label)
+    }
+    return Array.from(byId.entries())
+      .map(([id, label]) => ({ id, label }))
+      .sort((a, b) => a.label.localeCompare(b.label))
+  }, [samples])
+
+  const availableBrands = useMemo(() => {
+    const byId = new Map<number, string>()
+    for (const sample of samples) {
+      if (!sample.brand_id || !sample.brands?.name) continue
+      byId.set(sample.brand_id, sample.brands.name)
+    }
+    return Array.from(byId.entries())
+      .map(([id, name]) => ({ id, name }))
+      .sort((a, b) => a.name.localeCompare(b.name))
+  }, [samples])
+
+  const availableDivisions = useMemo(() => {
+    const set = new Set<string>()
+    for (const sample of samples) {
+      if (sample.division && sample.division.trim()) set.add(sample.division.trim())
+    }
+    return Array.from(set).sort((a, b) => a.localeCompare(b))
+  }, [samples])
+
+  const availableCategories = useMemo(() => {
+    const set = new Set<string>()
+    for (const sample of samples) {
+      if (sample.product_category && sample.product_category.trim()) set.add(sample.product_category.trim())
     }
     return Array.from(set).sort((a, b) => a.localeCompare(b))
   }, [samples])
@@ -514,7 +579,8 @@ export default function SamplesListPage() {
   async function onExport() {
     try {
       setExporting(true)
-      const { blob, filename } = await exportSamplesCsv({
+      const { blob, filename } = await exportSamples({
+        format: exportFormat,
         season_id: filters.season_id,
         brand_id: filters.brand_id,
       })
@@ -547,15 +613,26 @@ export default function SamplesListPage() {
     <div className="space-y-6 px-6 mt-5">
       <div className="flex items-center justify-between">
         <div>        </div>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={onExport}
-          disabled={exporting}
-        >
-          <Download className="h-4 w-4" />
-          {exporting ? "Exporting..." : "Export to Excel"}
-        </Button>
+        <div className="flex items-center gap-2">
+          <Select value={exportFormat} onValueChange={(value) => setExportFormat(value as ExportFormat)}>
+            <SelectTrigger className="h-9 w-[120px]">
+              <SelectValue placeholder="Format" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="xlsx">Excel (.xlsx)</SelectItem>
+              <SelectItem value="csv">CSV (.csv)</SelectItem>
+            </SelectContent>
+          </Select>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={onExport}
+            disabled={exporting}
+          >
+            <Download className="h-4 w-4" />
+            {exporting ? "Exporting..." : `Export ${exportFormat.toUpperCase()}`}
+          </Button>
+        </div>
       </div>
 
       <Card>
@@ -608,9 +685,9 @@ export default function SamplesListPage() {
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="all">All Seasons</SelectItem>
-                      {lookups.seasons.map((season) => (
+                      {availableSeasons.map((season) => (
                         <SelectItem key={season.id} value={season.id.toString()}>
-                          {season.code} {season.year}
+                          {season.label}
                         </SelectItem>
                       ))}
                     </SelectContent>
@@ -627,7 +704,7 @@ export default function SamplesListPage() {
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="all">All Brands</SelectItem>
-                      {lookups.brands.map((brand) => (
+                      {availableBrands.map((brand) => (
                         <SelectItem key={brand.id} value={brand.id.toString()}>
                           {brand.name}
                         </SelectItem>
@@ -646,9 +723,9 @@ export default function SamplesListPage() {
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="all">All Divisions</SelectItem>
-                      {lookups.divisions.map((division) => (
-                        <SelectItem key={division.id} value={division.name}>
-                          {division.name}
+                      {availableDivisions.map((division) => (
+                        <SelectItem key={division} value={division}>
+                          {division}
                         </SelectItem>
                       ))}
                     </SelectContent>
@@ -665,9 +742,9 @@ export default function SamplesListPage() {
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="all">All Categories</SelectItem>
-                      {lookups.product_categories.map((cat) => (
-                        <SelectItem key={cat.id} value={cat.name}>
-                          {cat.name}
+                      {availableCategories.map((category) => (
+                        <SelectItem key={category} value={category}>
+                          {category}
                         </SelectItem>
                       ))}
                     </SelectContent>
@@ -793,26 +870,27 @@ export default function SamplesListPage() {
                             "-"
                           )}
                         </td>
-                        <td className="h-12 px-2 align-middle text-right" data-actions>
-                          <div className="flex justify-end gap-1" data-actions>
+                        <td className="h-12 px-2 align-middle text-center" data-actions>
+                          <div className="inline-flex items-center justify-center gap-2 min-w-[180px]" data-actions>
                             <Button
                               variant="ghost"
-                              size="icon-xs"
+                              size="icon-lg"
                               aria-label="View"
                               type="button"
+                              className="transition-transform duration-150 hover:scale-110 hover:text-blue-600"
                               onClick={(e) => {
                                 e.preventDefault()
                                 e.stopPropagation()
                                 navigate(`/samples/${sample.id}`)
                               }}
                             >
-                              <Eye className="h-4 w-4" />
+                              <Eye className="h-6 w-6" />
                             </Button>
                             {canEdit && (
                               <button
                                 type="button"
                                 aria-label="Edit sample"
-                                className="inline-flex size-6 items-center justify-center rounded-md hover:bg-accent hover:text-accent-foreground [&_svg]:size-3"
+                                className="inline-flex size-6 items-center justify-center rounded-md transition-transform duration-150 hover:scale-110 hover:text-green-600"
                                 onMouseDown={(e) => {
                                   e.preventDefault()
                                   e.stopPropagation()
@@ -823,37 +901,39 @@ export default function SamplesListPage() {
                                   setEditingSampleId(sample.id)
                                 }}
                               >
-                                <Edit className="h-4 w-4" />
+                                <Edit className="h-5 w-5" />
                               </button>
-                            )}
-                            {canEditStage && (
-                              <Button
-                                variant="ghost"
-                                size="icon-xs"
-                                aria-label="Edit stage"
-                                type="button"
-                                onClick={(e) => {
-                                  e.preventDefault()
-                                  e.stopPropagation()
-                                  navigate(`/samples/${sample.id}/stage-edit`)
-                                }}
-                              >
-                                <FileEdit className="h-4 w-4" />
-                              </Button>
                             )}
                             {canEdit && (
                               <Button
                                 variant="ghost"
-                                size="icon-xs"
+                                size="icon-lg"
                                 aria-label="Delete sample"
                                 type="button"
+                                className="transition-transform duration-150 hover:scale-110 hover:text-red-600"
                                 onClick={(e) => {
                                   e.preventDefault()
                                   e.stopPropagation()
                                   openDeleteSample(sample)
                                 }}
                               >
-                                <Trash2 className="h-4 w-4 text-destructive" />
+                                <Trash2 className="h-6 w-6 text-destructive" />
+                              </Button>
+                            )}
+                            {canEditStage && (
+                              <Button
+                                variant="ghost"
+                                size="icon-lg"
+                                aria-label="Edit stage"
+                                type="button"
+                                className="transition-transform duration-150 hover:scale-110 hover:text-blue-600 w-12"
+                                onClick={(e) => {
+                                  e.preventDefault()
+                                  e.stopPropagation()
+                                  navigate(`/samples/${sample.id}/stage-edit`)
+                                }}
+                              >
+                                <ArrowRight className="h-6 w-8 text-blue-600" />
                               </Button>
                             )}
                           </div>
@@ -1136,13 +1216,22 @@ export default function SamplesListPage() {
                 const next = getNextStage(current)
                 const currentLabel = current ? (STAGE_LABELS[current] ?? current) : "—"
                 const nextLabel = next ? (STAGE_LABELS[next] ?? next) : "—"
+                const isDeliveredStep = next === STAGES.DELIVERED_CONFIRMATION
+                const canConfirmDelivered = !isDeliveredStep || isDatePast(editShipmentEta)
                 if (next) {
                   return (
                     <>
-                      Save your changes and move this sample to the next stage?
+                      {isDeliveredStep
+                        ? "Confirm delivery and mark this sample as delivered?"
+                        : "Save your changes and move this sample to the next stage?"}
                       <span className="mt-2 block font-medium text-foreground">
                         Current: {currentLabel} → Next: {nextLabel}
                       </span>
+                      {isDeliveredStep && !canConfirmDelivered && (
+                        <span className="mt-2 block text-muted-foreground">
+                          Delivery confirmation is enabled only when Package ETA in Denver is already past.
+                        </span>
+                      )}
                     </>
                   )
                 }
@@ -1169,10 +1258,18 @@ export default function SamplesListPage() {
             </Button>
             <Button
               type="button"
-              disabled={editSaving || !getNextStage(editFormData.current_stage)}
+              disabled={
+                editSaving ||
+                !getNextStage(editFormData.current_stage) ||
+                (getNextStage(editFormData.current_stage) === STAGES.DELIVERED_CONFIRMATION && !isDatePast(editShipmentEta))
+              }
               onClick={() => doSave(true)}
             >
-              {editSaving ? "Saving..." : "Save & move to next stage"}
+              {editSaving
+                ? "Saving..."
+                : getNextStage(editFormData.current_stage) === STAGES.DELIVERED_CONFIRMATION
+                  ? "Delivered"
+                  : "Save & move to next stage"}
             </Button>
           </AlertDialogFooter>
         </AlertDialogContent>

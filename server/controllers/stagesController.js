@@ -2,6 +2,14 @@ import { supabase } from '../config/supabase.js';
 import { logAudit, auditMeta } from '../services/auditService.js';
 import { STAGE_TABLES, getStagesForRole } from '../middleware/rbac.js';
 
+const STAGE_FLOW = [...STAGE_TABLES, 'delivered_confirmation'];
+
+function getNextStage(currentStage) {
+  const idx = STAGE_FLOW.indexOf(currentStage);
+  if (idx === -1 || idx >= STAGE_FLOW.length - 1) return null;
+  return STAGE_FLOW[idx + 1] ?? null;
+}
+
 /** Ensure sample exists; return 404 if not. Stages are always scoped to a sample. */
 async function ensureSampleExists(sampleId) {
   const { data, error } = await supabase.from('sample_request').select('sample_id').eq('sample_id', sampleId).maybeSingle();
@@ -43,7 +51,12 @@ export const updateStage = async (req, res) => {
     const sampleExists = await ensureSampleExists(sampleId);
     if (!sampleExists) return res.status(404).json({ error: 'Sample not found' });
 
-    const { stage, sample_id: _bodySampleId, ...payload } = req.body;
+    const {
+      stage,
+      sample_id: _bodySampleId,
+      advance_to_stage,
+      ...payload
+    } = req.body;
     console.log('[DEBUG] updateStage - stage:', stage);
     console.log('[DEBUG] updateStage - payload:', JSON.stringify(payload, null, 2));
     
@@ -76,6 +89,20 @@ export const updateStage = async (req, res) => {
       if (error) throw error;
       data = inserted;
       console.log('[DEBUG] Inserted record:', JSON.stringify(inserted, null, 2));
+    }
+
+    if (advance_to_stage) {
+      const requestedNext = String(advance_to_stage).trim().toLowerCase();
+      const expectedNext = getNextStage(stage);
+      if (!expectedNext || requestedNext !== expectedNext) {
+        return res.status(400).json({ error: `Invalid stage transition. Allowed next stage from ${stage} is ${expectedNext ?? 'none'}.` });
+      }
+
+      const { error: stageErr } = await supabase
+        .from('sample_request')
+        .update({ current_stage: requestedNext })
+        .eq('sample_id', sampleId);
+      if (stageErr) throw stageErr;
     }
 
     // Update sample_request current_status to PROCESSING when a stage is touched

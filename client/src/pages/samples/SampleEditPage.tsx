@@ -40,47 +40,21 @@ import type { RoleCode } from "@/lib/constants"
 import { useAuth } from "@/contexts/auth"
 import { toast } from "sonner"
 
-const STAGE_OPTIONS = [
-  { value: STAGES.PSI, label: "Product / Business Dev (PSI)" },
-  { value: STAGES.SAMPLE_DEVELOPMENT, label: "Sample Development" },
-  { value: STAGES.PC_REVIEW, label: "PC Review" },
-  { value: STAGES.COSTING, label: "Costing" },
-  { value: STAGES.SCF, label: "SCF" },
-  { value: STAGES.SHIPMENT_TO_BRAND, label: "Shipment to Brand" },
-] as const
-
 const STAGE_ORDER: string[] = [
   STAGES.PSI,
   STAGES.SAMPLE_DEVELOPMENT,
   STAGES.PC_REVIEW,
   STAGES.COSTING,
-  STAGES.SCF,
   STAGES.SHIPMENT_TO_BRAND,
 ]
 
 const STAGE_LABELS: Record<string, string> = {
-  [STAGES.PSI]: "Product / Business Dev",
-  [STAGES.SAMPLE_DEVELOPMENT]: "Sample Development",
-  [STAGES.PC_REVIEW]: "PC Review",
-  [STAGES.COSTING]: "Costing",
-  [STAGES.SCF]: "SCF",
-  [STAGES.SHIPMENT_TO_BRAND]: "Shipment to Brand",
+  [STAGES.PSI]: "PSI Intake (Business Development)",
+  [STAGES.SAMPLE_DEVELOPMENT]: "Factory Development Updates",
+  [STAGES.PC_REVIEW]: "MD / Product Review Decision",
+  [STAGES.COSTING]: "Cost Sheet Processing",
+  [STAGES.SHIPMENT_TO_BRAND]: "Brand Delivery Tracking",
 }
-
-const STATUS_OPTIONS = [
-  'INITIATED',
-  'PSI_SENT',
-  'IN_DEVELOPMENT',
-  'FIT_REVIEW',
-  'PENDING_REVIEW',
-  'APPROVED',
-  'REJECTED',
-  'COSTING_RECEIVED',
-  'COSTING_COMPLETE',
-  'SCF_SHARED',
-  'SHIPPED',
-  'DELIVERED',
-] as const
 
 function getNextStage(currentStage: string | null | undefined): string | null {
   if (!currentStage) return STAGE_ORDER[0] ?? null

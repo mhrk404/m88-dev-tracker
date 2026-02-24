@@ -27,7 +27,7 @@ Base URL: `/api` (e.g. `http://localhost:5000/api`).
 *   **Data Scope**: Sees all samples.
 
 ### 5. FTY (Factory Execution)
-*   **Stage Control**: Writes to **SAMPLE_DEVELOPMENT** (Actual Send), **COSTING** (Submit), and **SCF**.
+*   **Stage Control**: Writes to **SAMPLE_DEVELOPMENT** (Actual Send) and **COSTING** (Submit).
 *   **Data Scope**: Sees only samples where they are assigned in `team_assignment`.
 
 ### 6. MD (Merchandising)
@@ -52,7 +52,6 @@ Base URL: `/api` (e.g. `http://localhost:5000/api`).
 | **SAMPLE_DEVELOPMENT** | TD, FTY |
 | **PC_REVIEW** | TD, MD |
 | **COSTING** | PBD, FTY, COSTING |
-| **SCF** | FTY |
 | **SHIPMENT_TO_BRAND** | PBD |
 
 ---

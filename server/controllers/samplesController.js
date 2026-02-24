@@ -11,7 +11,18 @@ const SAMPLE_REQUEST_SELECT = `
     seasons:seasons!season_id(code, year)
   ),
   team_assignment:team_assignment!sample_id(
-    assignment_id, pbd_user_id, td_user_id, fty_user_id, fty_md2_user_id, md_user_id, costing_user_id
+    assignment_id,
+    pbd_user_id,
+    td_user_id,
+    fty_user_id,
+    fty_md2_user_id,
+    md_user_id,
+    costing_user_id,
+    pbd:pbd_user_id(full_name),
+    td:td_user_id(full_name),
+    fty_md2:fty_md2_user_id(full_name),
+    md:md_user_id(full_name),
+    costing:costing_user_id(full_name)
   )
 `;
 
@@ -45,6 +56,36 @@ function flattenSample(s) {
 }
 
 const flattenList = (list) => (list || []).map(flattenSample);
+
+function normalizeStage(stage) {
+  return typeof stage === 'string' ? stage.trim().toLowerCase() : null;
+}
+
+function visibleStagesForRole(roleCode) {
+  const role = String(roleCode || '').toUpperCase();
+  switch (role) {
+    case 'FTY':
+      return ['sample_development'];
+    case 'TD':
+      return ['psi'];
+    case 'MD':
+      return ['pc_review'];
+    case 'COSTING':
+      return ['costing'];
+    case 'PBD':
+      return ['psi', 'shipment_to_brand', 'delivered_confirmation'];
+    default:
+      return null;
+  }
+}
+
+function canViewSampleForRole(roleCode, currentStage) {
+  const allowedStages = visibleStagesForRole(roleCode);
+  if (!allowedStages) return true;
+  const stage = normalizeStage(currentStage);
+  if (!stage) return false;
+  return allowedStages.includes(stage);
+}
 
 /** Write a field-level change to stage_audit_log. Non-blocking. */
 async function recordHistory(sampleId, tableName, fieldName, oldValue, newValue, changedBy, notes = null) {
@@ -108,7 +149,10 @@ export const list = async (req, res) => {
     if (sample_status) q = q.eq('sample_status', sample_status);
     const { data, error } = await q;
     if (error) throw error;
-    return res.json(flattenList(data));
+
+    const flat = flattenList(data);
+    const filtered = flat.filter((sample) => canViewSampleForRole(req.user?.roleCode, sample.current_stage));
+    return res.json(filtered);
   } catch (err) {
     console.error('samples list:', err);
     return res.status(500).json({ error: err.message ?? 'Failed to list samples' });
@@ -128,7 +172,12 @@ export const getOne = async (req, res) => {
       .maybeSingle();
     if (error) throw error;
     if (!data) return res.status(404).json({ error: 'Sample not found' });
-    return res.json(flattenSample(data));
+
+    const flat = flattenSample(data);
+    if (!canViewSampleForRole(req.user?.roleCode, flat.current_stage)) {
+      return res.status(403).json({ error: 'You can only access samples that are at your stage.' });
+    }
+    return res.json(flat);
   } catch (err) {
     console.error('samples getOne:', err);
     return res.status(500).json({ error: err.message ?? 'Failed to get sample' });
@@ -149,9 +198,11 @@ export const getFull = async (req, res) => {
     if (sampleError) throw sampleError;
     if (!sample) return res.status(404).json({ error: 'Sample not found' });
 
-    const allowedStages = getStagesForRole(req.user?.roleCode);
-    const stageTablesToFetch = allowedStages == null ? STAGE_TABLES : allowedStages;
+    if (!canViewSampleForRole(req.user?.roleCode, sample.current_stage)) {
+      return res.status(403).json({ error: 'You can only access samples that are at your stage.' });
+    }
 
+    // For full view, fetch ALL stage data regardless of role (read-only display)
     const stagePromises = STAGE_TABLES.map((table) =>
       supabase.from(table).select('*').eq('sample_id', sampleId).maybeSingle()
     );
@@ -163,9 +214,10 @@ export const getFull = async (req, res) => {
       auditPromise,
     ]);
 
+    // Return all stage data for full view (used by detail page Additional Info)
     const stages = {};
     STAGE_TABLES.forEach((table, i) => {
-      stages[table] = stageTablesToFetch.includes(table) ? (stageResults[i]?.data ?? null) : null;
+      stages[table] = stageResults[i]?.data ?? null;
     });
 
     const flat = flattenSample(sample);

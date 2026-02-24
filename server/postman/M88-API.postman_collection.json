@@ -2,7 +2,7 @@
   "info": {
     "name": "M88 Dev Tracker API",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
-    "description": "**Base URL:** {{baseUrl}} (default http://localhost:5000/api)\n\n**RBAC Roles:** PBD, TD, FTY, MD, COSTING, BRAND, ADMIN.\n\n**Schema Logic:** The system uses a specialized schema for sample lifecycle tracking. Stages include **PSI, SAMPLE_DEVELOPMENT, PC_REVIEW, COSTING, SCF, SHIPMENT_TO_BRAND**.\n\n**How to test:**\n1. **Auth → Login** as admin (password123). Token is saved automatically.\n2. **Lookups/Brands/Seasons** to get context IDs.\n3. **Styles → Create style** to get a `style_id`.\n4. **Samples → Create sample** using that `style_id`.\n5. Use **Stages → Update stage** to progress the sample.\n6. Check **Analytics** for performance metrics."
+    "description": "**Base URL:** {{baseUrl}} (default http://localhost:5000/api)\n\n**RBAC Roles:** PBD, TD, FTY, MD, COSTING, BRAND, ADMIN.\n\n**Schema Logic:** The system uses a specialized schema for sample lifecycle tracking. Stages include **PSI, SAMPLE_DEVELOPMENT, PC_REVIEW, COSTING, SHIPMENT_TO_BRAND**.\n\n**How to test:**\n1. **Auth → Login** as admin (password123). Token is saved automatically.\n2. **Lookups/Brands/Seasons** to get context IDs.\n3. **Styles → Create style** to get a `style_id`.\n4. **Samples → Create sample** using that `style_id`.\n5. Use **Stages → Update stage** to progress the sample.\n6. Check **Analytics** for performance metrics."
   },
   "variable": [
     {

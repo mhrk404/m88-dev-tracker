@@ -20,8 +20,8 @@ export const STAGES = {
   SAMPLE_DEVELOPMENT: "sample_development",
   PC_REVIEW: "pc_review",
   COSTING: "costing",
-  SCF: "scf",
   SHIPMENT_TO_BRAND: "shipment_to_brand",
+  DELIVERED_CONFIRMATION: "delivered_confirmation",
 } as const
 
 export type StageName = typeof STAGES[keyof typeof STAGES]

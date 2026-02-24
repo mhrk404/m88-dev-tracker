@@ -12,7 +12,6 @@ export const STAGE_TABLES = [
   'sample_development',
   'pc_review',
   'costing',
-  'scf',
   'shipment_to_brand',
 ];
 
@@ -23,7 +22,7 @@ const ROLE_STAGES = {
   BRAND: null,
   PBD: ['costing', 'shipment_to_brand'],
   TD: ['psi', 'sample_development', 'pc_review'],
-  FTY: ['sample_development', 'costing', 'scf'],
+  FTY: ['sample_development', 'costing'],
   MD: ['pc_review'],
   COSTING: ['costing'],
 };

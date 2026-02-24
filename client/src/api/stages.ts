@@ -3,14 +3,7 @@ import type { StageName } from "@/lib/constants"
 
 export interface StagesResponse {
   sample_id: string
-  stages: {
-    psi: Record<string, unknown> | null
-    sample_development: Record<string, unknown> | null
-    pc_review: Record<string, unknown> | null
-    costing: Record<string, unknown> | null
-    scf: Record<string, unknown> | null
-    shipment_to_brand: Record<string, unknown> | null
-  }
+  stages: Partial<Record<StageName, Record<string, unknown> | null>>
 }
 
 export async function getStages(sampleId: string): Promise<StagesResponse> {

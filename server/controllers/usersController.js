@@ -1,11 +1,46 @@
 import { supabase } from '../config/supabase.js';
 import { logAudit, auditMeta } from '../services/auditService.js';
+import { canAccessRegion, isAdmin, isSuperAdmin, normalizeRegion, isValidRegion } from '../utils/regionScope.js';
 
-const USER_SELECT = 'id, username, email, full_name, department, role_id, is_active, created_at, updated_at';
+const USER_SELECT = 'id, username, email, full_name, department, region, role_id, is_active, created_at, updated_at';
+
+function requesterRegion(req) {
+  return normalizeRegion(req.user?.region) || 'US';
+}
+
+async function getUserById(id) {
+  const { data, error } = await supabase.from('users').select(`${USER_SELECT}, roles(code, name)`).eq('id', id).maybeSingle();
+  if (error) throw error;
+  return data;
+}
+
+async function ensureRegionAccess(req, userId) {
+  if (isSuperAdmin(req)) return null;
+  const row = await getUserById(userId);
+  if (!row) return null;
+  if (!canAccessRegion(req, row.region)) {
+    const err = new Error('You can only access users within your region');
+    err.statusCode = 403;
+    throw err;
+  }
+  return row;
+}
+
+async function getRoleCodeById(roleId) {
+  if (roleId == null) return null;
+  const numericRoleId = Number(roleId);
+  if (Number.isNaN(numericRoleId)) return null;
+  const { data, error } = await supabase.from('roles').select('code').eq('id', numericRoleId).maybeSingle();
+  if (error) throw error;
+  return (data?.code || '').toUpperCase() || null;
+}
 
 export const list = async (req, res) => {
   try {
-    const { data, error } = await supabase.from('users').select(`${USER_SELECT}, roles(code, name)`).order('username');
+    let query = supabase.from('users').select(`${USER_SELECT}, roles(code, name)`).order('username');
+    // Note: For admins, we return all users but frontend will filter admin visibility by region
+    // This allows admins to see non-admin users from all regions for sample workflow
+    const { data, error } = await query;
     if (error) throw error;
     const list = (data ?? []).map((u) => ({ ...u, roleCode: u.roles?.code, roleName: u.roles?.name, roles: undefined }));
     return res.json(list);
@@ -19,29 +54,45 @@ export const getOne = async (req, res) => {
   try {
     const id = Number(req.params.id);
     if (Number.isNaN(id)) return res.status(400).json({ error: 'Invalid id' });
-    const { data, error } = await supabase.from('users').select(`${USER_SELECT}, roles(code, name)`).eq('id', id).maybeSingle();
-    if (error) throw error;
+    const data = await ensureRegionAccess(req, id) || await getUserById(id);
     if (!data) return res.status(404).json({ error: 'User not found' });
     const u = { ...data, roleCode: data.roles?.code, roleName: data.roles?.name };
     delete u.roles;
     return res.json(u);
   } catch (err) {
     console.error('users getOne:', err);
-    return res.status(500).json({ error: err.message ?? 'Failed to get user' });
+    return res.status(err.statusCode || 500).json({ error: err.message ?? 'Failed to get user' });
   }
 };
 
 export const create = async (req, res) => {
   try {
-    const { username, email, full_name, department, role_id, is_active = true, password } = req.body;
+    const { username, email, full_name, department, role_id, region, is_active = true, password } = req.body;
     if (!username?.trim()) return res.status(400).json({ error: 'username is required' });
     if (!email?.trim()) return res.status(400).json({ error: 'email is required' });
+
+    const normalizedRegion = normalizeRegion(region) || requesterRegion(req);
+    if (!isValidRegion(normalizedRegion)) {
+      return res.status(400).json({ error: 'region must be one of: US, PH, INDONESIA' });
+    }
+    if (!isSuperAdmin(req) && !canAccessRegion(req, normalizedRegion)) {
+      return res.status(403).json({ error: 'You can only create users within your region' });
+    }
+
+    if (role_id !== undefined && role_id !== null) {
+      const assignedRoleCode = await getRoleCodeById(role_id);
+      if (!assignedRoleCode) return res.status(400).json({ error: 'Invalid role_id' });
+      if (assignedRoleCode === 'SUPER_ADMIN' && !isSuperAdmin(req)) {
+        return res.status(403).json({ error: 'Only super admin can assign SUPER_ADMIN role' });
+      }
+    }
     
     let payload = {
       username: username.trim(),
       email: email.trim().toLowerCase(),
       full_name: full_name?.trim() || null,
       department: department?.trim() || null,
+      region: normalizedRegion,
       role_id: role_id ?? null,
       is_active: !!is_active,
     };
@@ -71,13 +122,33 @@ export const update = async (req, res) => {
   try {
     const id = Number(req.params.id);
     if (Number.isNaN(id)) return res.status(400).json({ error: 'Invalid id' });
-    const { username, email, full_name, department, role_id, is_active } = req.body;
+    const existing = await ensureRegionAccess(req, id) || await getUserById(id);
+    if (!existing) return res.status(404).json({ error: 'User not found' });
+
+    const { username, email, full_name, department, role_id, region, is_active } = req.body;
     const updates = {};
     if (username !== undefined) updates.username = username.trim();
     if (email !== undefined) updates.email = email.trim().toLowerCase();
     if (full_name !== undefined) updates.full_name = full_name?.trim() || null;
     if (department !== undefined) updates.department = department?.trim() || null;
+    if (region !== undefined) {
+      const normalizedRegion = normalizeRegion(region);
+      if (!normalizedRegion || !isValidRegion(normalizedRegion)) {
+        return res.status(400).json({ error: 'region must be one of: US, PH, INDONESIA' });
+      }
+      if (!isSuperAdmin(req) && !canAccessRegion(req, normalizedRegion)) {
+        return res.status(403).json({ error: 'You can only move users within your region' });
+      }
+      updates.region = normalizedRegion;
+    }
     if (role_id !== undefined) updates.role_id = role_id;
+    if (role_id !== undefined && role_id !== null) {
+      const assignedRoleCode = await getRoleCodeById(role_id);
+      if (!assignedRoleCode) return res.status(400).json({ error: 'Invalid role_id' });
+      if (assignedRoleCode === 'SUPER_ADMIN' && !isSuperAdmin(req)) {
+        return res.status(403).json({ error: 'Only super admin can assign SUPER_ADMIN role' });
+      }
+    }
     if (is_active !== undefined) updates.is_active = !!is_active;
     if (Object.keys(updates).length === 0) return res.status(400).json({ error: 'No fields to update' });
     const { data, error } = await supabase.from('users').update(updates).eq('id', id).select(USER_SELECT).maybeSingle();
@@ -91,7 +162,7 @@ export const update = async (req, res) => {
     return res.json(data);
   } catch (err) {
     console.error('users update:', err);
-    return res.status(500).json({ error: err.message ?? 'Failed to update user' });
+    return res.status(err.statusCode || 500).json({ error: err.message ?? 'Failed to update user' });
   }
 };
 
@@ -109,6 +180,8 @@ export const remove = async (req, res) => {
   try {
     const id = Number(req.params.id);
     if (Number.isNaN(id)) return res.status(400).json({ error: 'Invalid id' });
+    const existing = await ensureRegionAccess(req, id) || await getUserById(id);
+    if (!existing) return res.status(404).json({ error: 'User not found' });
 
     const replacementId = await getReplacementUserId(id);
     if (!replacementId) {
@@ -147,6 +220,6 @@ export const remove = async (req, res) => {
     return res.status(204).send();
   } catch (err) {
     console.error('users remove:', err);
-    return res.status(500).json({ error: err.message ?? 'Failed to delete user' });
+    return res.status(err.statusCode || 500).json({ error: err.message ?? 'Failed to delete user' });
   }
 };

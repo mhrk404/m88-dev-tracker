@@ -26,7 +26,7 @@ export function canEditSample(roleCode: RoleCode): boolean {
 export function stageForRole(roleCode: RoleCode): StageName | null {
   switch (roleCode) {
     case ROLES.PBD:
-      return null
+      return STAGES.SHIPMENT_TO_BRAND
     case ROLES.MD:
       return STAGES.PC_REVIEW
     case ROLES.TD:

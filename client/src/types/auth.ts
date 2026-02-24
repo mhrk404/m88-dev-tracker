@@ -9,6 +9,7 @@ export interface AuthUser {
   email: string
   full_name: string | null
   department: string | null
+  region: "US" | "PH" | "INDONESIA"
   role_id: number
   is_active: boolean
   roleCode: string

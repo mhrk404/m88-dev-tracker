@@ -38,12 +38,11 @@ import { cn } from "@/lib/utils"
 import { getStatusColor } from "@/lib/statusColors"
 
 const stageSteps = [
-  { key: STAGES.PSI, label: "PSI", name: "Product / Business Dev" },
-  { key: STAGES.SAMPLE_DEVELOPMENT, label: "DEV", name: "Sample Development" },
-  { key: STAGES.PC_REVIEW, label: "PC", name: "PC Review" },
-  { key: STAGES.COSTING, label: "COST", name: "Costing" },
-  { key: STAGES.SCF, label: "SCF", name: "SCF" },
-  { key: STAGES.SHIPMENT_TO_BRAND, label: "SHIP", name: "Shipment to Brand" },
+  { key: STAGES.PSI, label: "PSI", name: "PSI Intake (Business Development)" },
+  { key: STAGES.SAMPLE_DEVELOPMENT, label: "DEV", name: "Factory Development Updates" },
+  { key: STAGES.PC_REVIEW, label: "PC", name: "MD / Product Review Decision" },
+  { key: STAGES.COSTING, label: "COST", name: "Cost Sheet Processing" },
+  { key: STAGES.SHIPMENT_TO_BRAND, label: "SHIP", name: "Brand Delivery Tracking" },
 ] as const
 
 type StepKey = (typeof stageSteps)[number]["key"]
@@ -62,8 +61,14 @@ const STAGE_FIELD_LABELS: Record<string, string> = {
   estimated_arrival: "Estimated arrival",
   actual_arrival: "Actual arrival",
   fty_md2: "FTY MD2",
+  fty_md_user_id: "Factory Merchandiser (FTY MD)",
   td_to_md_comment: "TD to MD comment",
+  td_fit_log_review_status: "TD Fit Log Review Status",
   modified_by_log: "Modified by (log)",
+  tp_handoff_td: "Date TP Hand-off to TD",
+  p3_remake_reason: "P3+ Sample Reason / Remake Reason",
+  team_member_user_id: "Costing Team Member",
+  pkg_eta_denver: "Package ETA in Denver",
   sent_status: "Costing Sent to Brand Status",
   cost_sheet_date: "Cost Sheet Entered Date",
 }
@@ -108,17 +113,104 @@ function formatStatusDisplay(status: string | null | undefined, stage: string | 
 }
 
 const STAGE_LABELS: Record<string, string> = {
-  [STAGES.PSI]: "Product / Business Dev (PSI)",
-  [STAGES.SAMPLE_DEVELOPMENT]: "Sample Development",
-  [STAGES.PC_REVIEW]: "PC Review",
-  [STAGES.COSTING]: "Costing",
-  [STAGES.SCF]: "SCF",
-  [STAGES.SHIPMENT_TO_BRAND]: "Shipment to Brand",
+  [STAGES.PSI]: "PSI Intake (Business Development)",
+  [STAGES.SAMPLE_DEVELOPMENT]: "Factory Development Updates",
+  [STAGES.PC_REVIEW]: "MD / Product Review Decision",
+  [STAGES.COSTING]: "Cost Sheet Processing",
+  [STAGES.SHIPMENT_TO_BRAND]: "Brand Delivery Tracking",
 }
 
 function formatStageDisplay(stage: string | null | undefined): string {
   if (!stage) return "-"
   return STAGE_LABELS[stage] || stage
+}
+
+function getSingleRelation<T>(value: T | T[] | null | undefined): T | null {
+  if (!value) return null
+  return Array.isArray(value) ? value[0] ?? null : value
+}
+
+function addDays(dateLike: string | null | undefined, days: number): string | null {
+  if (!dateLike) return null
+  const d = new Date(dateLike)
+  if (Number.isNaN(d.getTime())) return null
+  d.setDate(d.getDate() + days)
+  return d.toISOString().slice(0, 10)
+}
+
+function subtractDays(dateLike: string | null | undefined, days: number): string | null {
+  if (!dateLike) return null
+  const d = new Date(dateLike)
+  if (Number.isNaN(d.getTime())) return null
+  d.setDate(d.getDate() - days)
+  return d.toISOString().slice(0, 10)
+}
+
+function dayDiffSafe(fromDate: string | null | undefined, toDate: string | null | undefined): number | null {
+  if (!fromDate || !toDate) return null
+  const from = new Date(fromDate)
+  const to = new Date(toDate)
+  if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime())) return null
+  return Math.round((to.getTime() - from.getTime()) / (1000 * 60 * 60 * 24))
+}
+
+function toWeekRange(dateLike: string | null | undefined): string {
+  if (!dateLike) return "-"
+  const date = new Date(dateLike)
+  if (Number.isNaN(date.getTime())) return "-"
+  const weekday = date.getDay()
+  const mondayOffset = (weekday + 6) % 7
+  const monday = new Date(date)
+  monday.setDate(monday.getDate() - mondayOffset)
+  const friday = new Date(monday)
+  friday.setDate(friday.getDate() + 4)
+  const fmt = (x: Date) => `${String(x.getMonth() + 1).padStart(2, "0")}/${String(x.getDate()).padStart(2, "0")}`
+  return `${fmt(monday)} - ${fmt(friday)}`
+}
+
+function monthShort(dateLike: string | null | undefined): string {
+  if (!dateLike) return "-"
+  const d = new Date(dateLike)
+  if (Number.isNaN(d.getTime())) return "-"
+  return d.toLocaleString("en-US", { month: "short" })
+}
+
+function yearNumber(dateLike: string | null | undefined): string {
+  if (!dateLike) return "-"
+  const d = new Date(dateLike)
+  if (Number.isNaN(d.getTime())) return "-"
+  return String(d.getFullYear())
+}
+
+function classifyByDueDate(due: string | null | undefined, actual: string | null | undefined): string {
+  const diff = dayDiffSafe(due, actual)
+  if (diff == null) return "Pending"
+  if (diff < 0) return "Early"
+  if (diff === 0) return "On Time"
+  return "Late"
+}
+
+function normalizeRejectFlag(value: unknown): boolean {
+  if (value == null) return false
+  const s = String(value).trim().toLowerCase()
+  if (!s) return false
+  return !["0", "false", "no", "none", "n/a"].includes(s)
+}
+
+function weekNum(dateLike: string | null | undefined): string {
+  if (!dateLike) return "-"
+  const d = new Date(dateLike)
+  if (Number.isNaN(d.getTime())) return "-"
+  const yearStart = new Date(d.getFullYear(), 0, 1)
+  const dayOfYear = Math.floor((d.getTime() - yearStart.getTime()) / (1000 * 60 * 60 * 24)) + 1
+  return String(Math.ceil(dayOfYear / 7))
+}
+
+function protoEfficiency(sampleType: string | null | undefined, hasReject: boolean, storedValue: unknown): string {
+  if (storedValue && String(storedValue).trim()) return String(storedValue)
+  const s = String(sampleType ?? "").toUpperCase()
+  if (!s.includes("PROTO")) return "Exempt"
+  return hasReject ? "Round 2+" : "Round 1"
 }
 
 export default function SampleDetailPage() {
@@ -185,17 +277,87 @@ export default function SampleDetailPage() {
     stageSteps.length > 1 ? (effectiveStageIdx / (stageSteps.length - 1)) * 100 : 0
   const currentStatusColor = getStatusColor(sample.current_status)
 
+  const assignment = getSingleRelation(sample.team_assignment)
+  const psi = sample.stages?.psi
+  const dev = sample.stages?.sample_development
+  const pc = sample.stages?.pc_review
+  const costing = sample.stages?.costing
+  const ship = sample.stages?.shipment_to_brand
+  const scf = (sample.stages as Record<string, StageData | null | undefined>)?.scf ?? null
+
+  const requestedLeadTime = sample.requested_lead_time ?? dayDiffSafe(sample.kickoff_date, sample.sample_due_denver)
+  const requestedLeadBucket = sample.lead_time_type || (requestedLeadTime != null
+    ? requestedLeadTime <= 7
+      ? "1 Week or Less"
+      : requestedLeadTime <= 14
+        ? "2 Weeks"
+        : requestedLeadTime <= 21
+          ? "3 Weeks"
+          : "4+ Weeks"
+    : "-")
+  const psiSentDate = (psi?.sent_date as string | undefined) ?? null
+  const actualShipDate = (dev?.actual_send as string | undefined) ?? null
+  const targetXfactory = (dev?.target_xfty as string | undefined) ?? null
+  const costSheetDate = (costing?.cost_sheet_date as string | undefined) ?? null
+  const dueCosting = addDays(actualShipDate, 1)
+  const estimateCostingDue = addDays(actualShipDate, 2)
+  const estimateXfactoryForDen = requestedLeadTime != null ? subtractDays(sample.sample_due_denver, requestedLeadTime) : null
+  const awbValue = (ship?.awb_number as string | undefined) || (dev?.awb as string | undefined) || ""
+  const hasReject = normalizeRejectFlag(pc?.reject_status) || normalizeRejectFlag(pc?.reject_by_md)
+
+  const additionalRows: Array<{ label: string; value: string }> = [
+    { label: "PBD", value: assignment?.pbd?.full_name || "-" },
+    { label: "TD", value: assignment?.td?.full_name || "-" },
+    { label: "FTY MD2", value: assignment?.fty_md2?.full_name || "-" },
+    { label: "MD M88", value: assignment?.md?.full_name || "-" },
+    { label: "Costing Team", value: assignment?.costing?.full_name || "-" },
+    { label: "Season/Brand", value: `${sample.seasons ? `${sample.seasons.code || sample.seasons.name} ${sample.seasons.year}` : "-"} / ${sample.brands?.name || "-"}` },
+    { label: "Style#/Name", value: `${sample.style_number || "-"} / ${sample.style_name || "-"}` },
+    { label: "Sample Type Group", value: sample.sample_type_group || sample.sample_type || "-" },
+    { label: "Requested Lead Time", value: requestedLeadTime != null ? String(requestedLeadTime) : "-" },
+    { label: "REQUESTED LEAD TIME to DEN", value: requestedLeadBucket },
+    { label: "PSI Creation Work Week", value: (psi?.work_week as string | undefined) || toWeekRange(psiSentDate) },
+    { label: "PSI Turn Time (Days)", value: String(dayDiffSafe(sample.kickoff_date, psiSentDate) ?? 0) },
+    { label: "PSI Month", value: (psi?.month as number | undefined)?.toString() || monthShort(psiSentDate) },
+    { label: "PSI Year", value: (psi?.year as number | undefined)?.toString() || yearNumber(psiSentDate) },
+    { label: "PSI Sent Status", value: psi?.sent_status ? String(psi.sent_status) : (psiSentDate ? "TRUE" : "FALSE") },
+    { label: "PSI Discrepancy Status", value: psi?.disc_status ? "Has Discrepancy" : "No Discrepancy" },
+    { label: "1st PC Reject Status MD", value: hasReject ? "Rejected" : "Not Rejected" },
+    { label: "TD to MD Comment Compare", value: pc?.td_md_compare != null ? String(pc.td_md_compare) : String((pc?.review_comp ?? "").toString().trim() === (pc?.md_int_review ?? "").toString().trim()) },
+    { label: "SCF Month", value: monthShort((scf?.shared_date as string | undefined) ?? null) },
+    { label: "SCF Year", value: yearNumber((scf?.shared_date as string | undefined) ?? null) },
+    { label: "SCF Performance", value: (scf?.performance as string | undefined) || "-" },
+    { label: "Target Xfactory Week", value: (dev?.target_xfty_wk as string | undefined) || toWeekRange(targetXfactory) },
+    { label: "Estimate FTY Costing Due Date", value: estimateCostingDue || "-" },
+    { label: "FTY Costing Due Date", value: dueCosting || "-" },
+    { label: "FTY Costing Due Week", value: toWeekRange(dueCosting) },
+    { label: "CBD Month", value: monthShort(costSheetDate) },
+    { label: "CBD Year", value: yearNumber(costSheetDate) },
+    { label: "FTY Costing Submit Performance", value: costSheetDate ? classifyByDueDate(dueCosting, costSheetDate) : "Pending" },
+    { label: "Estimate Xfactory for Sample due in Denver", value: estimateXfactoryForDen || "-" },
+    { label: "Sample Due in Denver Status", value: classifyByDueDate(sample.sample_due_denver, actualShipDate) },
+    { label: "AWB# Status", value: awbValue ? "Populated" : "Blank" },
+    { label: "Sample Week Num", value: (ship?.week_num as string | undefined) || weekNum(actualShipDate) },
+    { label: "Sample Arrival WEEK", value: (ship?.arrival_week as string | undefined) || toWeekRange(actualShipDate) },
+    { label: "Sample Arrival Month", value: ship?.arrival_month ? String(ship.arrival_month) : monthShort(actualShipDate) },
+    { label: "Sample Arrival Year", value: ship?.arrival_year ? String(ship.arrival_year) : yearNumber(actualShipDate) },
+    { label: "Factory Lead Time", value: String(dayDiffSafe(psiSentDate, actualShipDate) ?? "-") },
+    { label: "FTY Sample Delivery Performance", value: (dev?.delivery_perf as string | undefined) || classifyByDueDate(targetXfactory, actualShipDate) },
+    { label: "Proto Efficiency", value: protoEfficiency(sample.sample_type, hasReject, dev?.proto_eff) },
+    { label: "Costing Lead Time from FTY", value: dayDiffSafe(actualShipDate, costSheetDate) != null ? String(dayDiffSafe(actualShipDate, costSheetDate)) : "NA" },
+    { label: "Costing sent to brand status", value: costing?.sent_status ? String(costing.sent_status).toLowerCase() : "-" },
+    { label: "Sample Sent to Brand Status", value: ship?.sent_status ? String(ship.sent_status) : (ship?.sent_date ? "sent" : awbValue ? "awb created" : "pending") },
+  ]
+
   // Lead time calculation for display
   const MS_PER_DAY = 1000 * 60 * 60 * 24
   const kickoffMs = sample.kickoff_date ? Date.parse(sample.kickoff_date) : null
   const dueMs = sample.sample_due_denver ? Date.parse(sample.sample_due_denver) : null
-  let calcDays: number | null = null
   let calcWeeks: number | null = null
   let calcClass: string | null = null
   if (kickoffMs && dueMs && Number.isFinite(kickoffMs) && Number.isFinite(dueMs)) {
     const days = Math.ceil((dueMs - kickoffMs) / MS_PER_DAY)
     const weeks = Math.ceil(days / 7)
-    calcDays = days
     calcWeeks = weeks
     if (weeks === 0) calcClass = null
     else if (weeks > 17) calcClass = 'STND'
@@ -517,6 +679,31 @@ export default function SampleDetailPage() {
               })}
             </div>
           </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="pb-2">
+          <CardTitle className="text-sm">Additional Info</CardTitle>
+          <CardDescription className="text-xs">Export-aligned fields (shown once, no duplicates)</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead className="h-9 w-[45%]">Field</TableHead>
+                <TableHead className="h-9">Value</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {additionalRows.map((row) => (
+                <TableRow key={row.label}>
+                  <TableCell className="py-2 text-muted-foreground">{row.label}</TableCell>
+                  <TableCell className="py-2 font-medium">{row.value || "-"}</TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
         </CardContent>
       </Card>
 

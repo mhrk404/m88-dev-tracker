@@ -2,6 +2,7 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { supabase } from '../config/supabase.js';
 import { logAudit, auditMeta } from '../services/auditService.js';
+import { normalizeRegion, isValidRegion } from '../utils/regionScope.js';
 
 const JWT_SECRET = process.env.JWT_SECRET || 'change-me-in-production';
 const JWT_EXPIRES_IN = process.env.JWT_EXPIRES_IN || '7d';
@@ -13,7 +14,7 @@ const SALT_ROUNDS = 12;
  */
 export const register = async (req, res) => {
   try {
-    const { username, email, password, full_name, department, role_id, role_code } = req.body;
+    const { username, email, password, full_name, department, role_id, role_code, region } = req.body;
 
     if (!username?.trim() || !email?.trim() || !password) {
       return res.status(400).json({ error: 'Username, email, and password are required' });
@@ -33,6 +34,11 @@ export const register = async (req, res) => {
       resolvedRoleId = defaultRole?.id;
     }
 
+    const normalizedRegion = normalizeRegion(region) || 'US';
+    if (!isValidRegion(normalizedRegion)) {
+      return res.status(400).json({ error: 'region must be one of: US, PH, INDONESIA' });
+    }
+
     const password_hash = await bcrypt.hash(password, SALT_ROUNDS);
 
     const { data: user, error } = await supabase
@@ -43,6 +49,7 @@ export const register = async (req, res) => {
         password_hash,
         full_name: full_name?.trim() || null,
         department: department?.trim() || null,
+        region: normalizedRegion,
         role_id: resolvedRoleId,
         is_active: true,
       })
@@ -52,6 +59,7 @@ export const register = async (req, res) => {
         email,
         full_name,
         department,
+        region,
         role_id,
         is_active,
         created_at
@@ -69,7 +77,7 @@ export const register = async (req, res) => {
     const roleCode = role?.code || 'ADMIN';
 
     const token = jwt.sign(
-      { id: user.id, username: user.username, roleCode },
+      { id: user.id, username: user.username, roleCode, region: user.region },
       JWT_SECRET,
       { expiresIn: JWT_EXPIRES_IN }
     );
@@ -104,7 +112,7 @@ export const login = async (req, res) => {
     const isEmail = loginId.includes('@');
     const { data: user, error } = await supabase
       .from('users')
-      .select('id, username, email, full_name, department, role_id, is_active, password_hash')
+      .select('id, username, email, full_name, department, region, role_id, is_active, password_hash')
       .eq(isEmail ? 'email' : 'username', loginId)
       .maybeSingle();
 
@@ -133,7 +141,7 @@ export const login = async (req, res) => {
     const roleCode = role?.code || 'ADMIN';
 
     const token = jwt.sign(
-      { id: user.id, username: user.username, roleCode },
+      { id: user.id, username: user.username, roleCode, region: user.region },
       JWT_SECRET,
       { expiresIn: JWT_EXPIRES_IN }
     );
@@ -176,7 +184,7 @@ export const me = async (req, res) => {
     const { id } = req.user;
     const { data: user, error } = await supabase
       .from('users')
-      .select('id, username, email, full_name, department, role_id, is_active, created_at')
+      .select('id, username, email, full_name, department, region, role_id, is_active, created_at')
       .eq('id', id)
       .single();
 

@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from "react"
+import { useEffect, useState, useCallback, useMemo } from "react"
 import { useParams, useNavigate, Link } from "react-router-dom"
 import { ChevronDown, Check } from "lucide-react"
 import { Button } from "@/components/ui/button"
@@ -38,11 +38,13 @@ import {
 } from "@/components/ui/breadcrumb"
 import { FormSkeleton } from "@/components/ui/skeletons"
 import { STAGES } from "@/lib/constants"
-import { stageForRole } from "@/lib/rbac"
+import { canEditSample, stageForRole } from "@/lib/rbac"
 import { getStageFields, stagePayloadFromForm, type StageFieldConfig } from "@/lib/stageFields"
 import { getSample, updateSample } from "@/api/samples"
+import { listUsers } from "@/api/users"
 import { getStages, updateStage, type StagesResponse } from "@/api/stages"
 import type { Sample } from "@/types/sample"
+import type { User } from "@/types/user"
 import type { StageName } from "@/lib/constants"
 import type { RoleCode } from "@/lib/constants"
 import { useAuth } from "@/contexts/auth"
@@ -50,12 +52,12 @@ import { toast } from "sonner"
 import { getStatusColor } from "@/lib/statusColors"
 
 const STAGE_LABELS: Record<StageName, string> = {
-  [STAGES.PSI]: "Product / Business Dev (PSI)",
-  [STAGES.SAMPLE_DEVELOPMENT]: "Sample Development",
-  [STAGES.PC_REVIEW]: "PC Review",
-  [STAGES.COSTING]: "Costing",
-  [STAGES.SCF]: "SCF",
-  [STAGES.SHIPMENT_TO_BRAND]: "Shipment to Brand",
+  [STAGES.PSI]: "PSI Intake (TD)",
+  [STAGES.SAMPLE_DEVELOPMENT]: "FTY Development ",
+  [STAGES.PC_REVIEW]: "MD / Product Review Decision",
+  [STAGES.COSTING]: "Cost Sheet Processing(Costing)",
+  [STAGES.SHIPMENT_TO_BRAND]: "Brand Delivery Tracking",
+  [STAGES.DELIVERED_CONFIRMATION]: "Delivered Confirmation",
 }
 
 const STAGE_OPTIONS: StageName[] = [
@@ -63,7 +65,6 @@ const STAGE_OPTIONS: StageName[] = [
   STAGES.SAMPLE_DEVELOPMENT,
   STAGES.PC_REVIEW,
   STAGES.COSTING,
-  STAGES.SCF,
   STAGES.SHIPMENT_TO_BRAND,
 ]
 
@@ -72,9 +73,26 @@ const STAGE_ORDER: StageName[] = [
   STAGES.SAMPLE_DEVELOPMENT,
   STAGES.PC_REVIEW,
   STAGES.COSTING,
-  STAGES.SCF,
   STAGES.SHIPMENT_TO_BRAND,
+  STAGES.DELIVERED_CONFIRMATION,
 ]
+
+const SECTION_LABELS: Record<string, string> = {
+  Setup: "Setup Details to Fill",
+  Status: "Status Updates to Record",
+  Shipping: "Shipping Details to Record",
+  Finalize: "Final Verification Fields",
+  default: "General Stage Fields",
+}
+
+function getStageLabel(stage: StageName | null | undefined): string {
+  if (!stage) return "-"
+  return STAGE_LABELS[stage] ?? stage
+}
+
+function getSectionLabel(sectionName: string): string {
+  return SECTION_LABELS[sectionName] ?? sectionName
+}
 
 function getNextStage(currentStage: StageName | null | undefined): StageName | null {
   if (!currentStage) return STAGE_ORDER[0] ?? null
@@ -97,12 +115,18 @@ function fieldValueToForm(value: unknown, type: StageFieldConfig["type"]): strin
   return String(value)
 }
 
+type FormValidationState = {
+  fieldErrors: Record<string, string>
+  canSubmit: boolean
+}
+
 export default function SampleStageEditPage() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
   const { user } = useAuth()
   const [sample, setSample] = useState<Sample | null>(null)
   const [stagesData, setStagesData] = useState<StagesResponse | null>(null)
+  const [users, setUsers] = useState<User[]>([])
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -111,10 +135,12 @@ export default function SampleStageEditPage() {
 
   const userStage = user ? stageForRole(user.roleCode as RoleCode) : null
   const isAdmin = user?.roleCode === "ADMIN" || user?.roleCode === "SUPER_ADMIN"
+  const canUpdateSampleRecord = user ? canEditSample(user.roleCode as RoleCode) : false
   const defaultStage: StageName | null = userStage ?? (isAdmin ? STAGES.PSI : null)
 
   const [selectedStage, setSelectedStage] = useState<StageName | null>(defaultStage)
   const [formValues, setFormValues] = useState<Record<string, string>>({})
+  const [initialFormValues, setInitialFormValues] = useState<Record<string, string>>({})
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({})
 
   const currentStage = selectedStage ?? userStage
@@ -149,6 +175,24 @@ export default function SampleStageEditPage() {
   }, [loadData])
 
   useEffect(() => {
+    if (!isAdmin) return
+    let active = true
+    async function loadUsers() {
+      try {
+        const data = await listUsers()
+        if (active) setUsers(data)
+      } catch (err) {
+        console.error("Failed to load users:", err)
+        toast.error("Failed to load users")
+      }
+    }
+    loadUsers()
+    return () => {
+      active = false
+    }
+  }, [isAdmin])
+
+  useEffect(() => {
     if (!currentStage || !stagesData) return
     const row = stagesData.stages[currentStage]
     const fields = getStageFields(currentStage)
@@ -157,6 +201,7 @@ export default function SampleStageEditPage() {
       initial[f.key] = fieldValueToForm(row?.[f.key], f.type)
     }
     setFormValues(initial)
+    setInitialFormValues(initial)
     
     // Find first incomplete section based on loaded data and open only that one
     const sectionFields: Record<string, typeof fields> = {}
@@ -186,6 +231,24 @@ export default function SampleStageEditPage() {
     setExpandedSections(initialExpanded)
   }, [currentStage, stagesData])
 
+  useEffect(() => {
+    if (!currentStage || isAdmin || !user) return
+
+    setFormValues((prev) => {
+      const next = { ...prev }
+
+      if (currentStage === STAGES.SAMPLE_DEVELOPMENT && user.roleCode === "FTY") {
+        if (!next.fty_md_user_id) next.fty_md_user_id = String(user.id)
+      }
+
+      if (currentStage === STAGES.COSTING && user.roleCode === "COSTING") {
+        if (!next.team_member_user_id) next.team_member_user_id = String(user.id)
+      }
+
+      return next
+    })
+  }, [currentStage, isAdmin, user])
+
   function toggleSection(sectionName: string) {
     setExpandedSections((prev) => ({
       ...prev,
@@ -201,19 +264,17 @@ export default function SampleStageEditPage() {
     })
   }
 
-  function handleSubmit(e: React.FormEvent) {
-    e.preventDefault()
-    if (!id || !currentStage) return
-    const ok = validateForm()
-    if (ok) setShowConfirm(true)
-  }
+  const validationState = useMemo<FormValidationState>(() => {
+    if (!currentStage) {
+      return {
+        fieldErrors: {},
+        canSubmit: false,
+      }
+    }
 
-  function validateForm(): boolean {
-    if (!currentStage) return false
     const fields = getStageFields(currentStage)
     const errs: Record<string, string> = {}
-    
-    // Validate filled fields for type correctness
+
     for (const f of fields) {
       const v = formValues[f.key]
       const hasValue = v !== undefined && v !== null && String(v).trim() !== ""
@@ -224,19 +285,27 @@ export default function SampleStageEditPage() {
       }
       if (!hasValue) continue
 
-      // Validate field types
       if (f.type === "number") {
         const n = Number(v)
         if (Number.isNaN(n)) {
           errs[f.key] = `${f.label} must be a number`
         }
       }
+
       if (f.type === "date") {
         const t = Date.parse(String(v))
         if (!Number.isFinite(t)) {
           errs[f.key] = `${f.label} must be a valid date`
         }
       }
+
+      if (f.type === "user_select") {
+        const n = Number(v)
+        if (Number.isNaN(n)) {
+          errs[f.key] = `${f.label} must be selected`
+        }
+      }
+
       if (f.type === "boolean") {
         const s = String(v)
         if (s !== "true" && s !== "false" && s !== "") {
@@ -245,6 +314,52 @@ export default function SampleStageEditPage() {
       }
     }
 
+    const isDirty = fields.some((f) => (formValues[f.key] ?? "") !== (initialFormValues[f.key] ?? ""))
+
+    return {
+      fieldErrors: errs,
+      canSubmit: isDirty && Object.keys(errs).length === 0,
+    }
+  }, [currentStage, formValues, initialFormValues])
+
+  const ftyUsers = useMemo(() => {
+    return users
+      .filter((u) => (u.roleCode || "").toUpperCase() === "FTY" && u.is_active)
+      .sort((a, b) => (a.full_name || a.username).localeCompare(b.full_name || b.username))
+  }, [users])
+
+  const costingUsers = useMemo(() => {
+    return users
+      .filter((u) => (u.roleCode || "").toUpperCase() === "COSTING" && u.is_active)
+      .sort((a, b) => (a.full_name || a.username).localeCompare(b.full_name || b.username))
+  }, [users])
+
+  const userNameById = useMemo(() => {
+    const map = new Map<number, string>()
+    users.forEach((u) => {
+      const name = u.full_name?.trim() || u.username
+      map.set(u.id, name)
+    })
+    return map
+  }, [users])
+
+  function getUserLabel(userId: string | undefined): string {
+    if (!userId) return ""
+    const idNum = Number(userId)
+    if (Number.isNaN(idNum)) return ""
+    return userNameById.get(idNum) || ""
+  }
+
+  function handleSubmit(e: React.FormEvent) {
+    e.preventDefault()
+    if (!id || !currentStage) return
+    const ok = validateForm()
+    if (ok) setShowConfirm(true)
+  }
+
+  function validateForm(): boolean {
+    const { fieldErrors: errs, canSubmit } = validationState
+
     setFieldErrors(errs)
     if (Object.keys(errs).length > 0) {
       const first = Object.values(errs)[0]
@@ -252,25 +367,7 @@ export default function SampleStageEditPage() {
       return false
     }
 
-    // Check if at least one section is completely filled (using existing isSectionComplete logic)
-    const sections: Record<string, typeof fields> = {}
-    fields.forEach((f) => {
-      const sectionName = f.section || "default"
-      if (!sections[sectionName]) sections[sectionName] = []
-      sections[sectionName].push(f)
-    })
-
-    const hasCompleteSection = Object.entries(sections).some(([sectionName, sectionFields]) => {
-      if (sectionName === "default") return true // Skip default section
-      return isSectionComplete(sectionFields)
-    })
-
-    if (!hasCompleteSection) {
-      toast.error("Complete at least one section (all fields) before saving")
-      return false
-    }
-
-    return true
+    return canSubmit
   }
 
   function canAdvanceStage(): boolean {
@@ -372,7 +469,11 @@ export default function SampleStageEditPage() {
         console.log('[DEBUG] Saving stage:', stage)
         console.log('[DEBUG] Form values:', formValues)
         console.log('[DEBUG] Payload to send:', payload)
-        await updateStage(sampleId, stage, payload)
+        const stagePayload: Record<string, unknown> = { ...payload }
+        if (moveToNext && nextStage) {
+          stagePayload.advance_to_stage = nextStage
+        }
+        await updateStage(sampleId, stage, stagePayload)
 
         const sampleUpdatePayload: Record<string, unknown> = {}
         if (stage === STAGES.PC_REVIEW) {
@@ -385,10 +486,10 @@ export default function SampleStageEditPage() {
         }
 
         if (moveToNext && nextStage) {
-          sampleUpdatePayload.current_stage = nextStage
+          // current_stage is advanced via updateStage() on backend
         }
 
-        if (Object.keys(sampleUpdatePayload).length > 0) {
+        if (canUpdateSampleRecord && Object.keys(sampleUpdatePayload).length > 0) {
           await updateSample(sampleId, sampleUpdatePayload)
         }
 
@@ -540,7 +641,7 @@ export default function SampleStageEditPage() {
             </div>
             <div>
               <div className="text-xs font-medium text-muted-foreground mb-1">Current Stage</div>
-              <div className="font-medium">{sample.current_stage ?? "-"}</div>
+              <div className="font-medium">{getStageLabel(sample.current_stage as StageName | null | undefined)}</div>
             </div>
           </div>
         </CardContent>
@@ -622,6 +723,14 @@ export default function SampleStageEditPage() {
                                 className="h-8 text-sm"
                               />
                             )}
+                            {f.type === "textarea" && (
+                              <textarea
+                                id={f.key}
+                                value={formValues[f.key] ?? ""}
+                                onChange={(e) => setFormValues((prev) => ({ ...prev, [f.key]: e.target.value }))}
+                                className="min-h-[84px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                              />
+                            )}
                             {f.type === "date" && (
                               <Input
                                 id={f.key}
@@ -673,6 +782,34 @@ export default function SampleStageEditPage() {
                                 </SelectContent>
                               </Select>
                             )}
+                            {f.type === "user_select" && (
+                              isAdmin ? (
+                                <Select
+                                  value={formValues[f.key] || "none"}
+                                  onValueChange={(v) => setFormValues((prev) => ({ ...prev, [f.key]: v === "none" ? "" : v }))}
+                                >
+                                  <SelectTrigger id={f.key} className="h-8">
+                                    <SelectValue placeholder="Select" />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="none">—</SelectItem>
+                                    {(f.key === "fty_md_user_id" ? ftyUsers : costingUsers).map((u) => (
+                                      <SelectItem key={u.id} value={String(u.id)}>
+                                        {u.full_name?.trim() || u.username}
+                                      </SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                              ) : (
+                                <Input
+                                  id={f.key}
+                                  value={getUserLabel(formValues[f.key]) || user?.full_name || user?.username || ""}
+                                  readOnly
+                                  disabled
+                                  className="h-8 text-sm"
+                                />
+                              )
+                            )}
                             {fieldErrors[f.key] && (
                               <p className="text-destructive text-xs">{fieldErrors[f.key]}</p>
                             )}
@@ -694,7 +831,7 @@ export default function SampleStageEditPage() {
                           <ChevronDown
                             className={`h-4 w-4 transition-transform ${isExpanded ? "" : "-rotate-90"}`}
                           />
-                          {sectionName}
+                          {getSectionLabel(sectionName)}
                         </div>
                         {isComplete && (
                           <div className="flex items-center gap-1 text-emerald-600">
@@ -717,6 +854,14 @@ export default function SampleStageEditPage() {
                                   value={formValues[f.key] ?? ""}
                                   onChange={(e) => setFormValues((prev) => ({ ...prev, [f.key]: e.target.value }))}
                                   className="h-8 text-sm"
+                                />
+                              )}
+                              {f.type === "textarea" && (
+                                <textarea
+                                  id={f.key}
+                                  value={formValues[f.key] ?? ""}
+                                  onChange={(e) => setFormValues((prev) => ({ ...prev, [f.key]: e.target.value }))}
+                                  className="min-h-[84px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                                 />
                               )}
                               {f.type === "date" && (
@@ -770,6 +915,34 @@ export default function SampleStageEditPage() {
                                   </SelectContent>
                                 </Select>
                               )}
+                              {f.type === "user_select" && (
+                                isAdmin ? (
+                                  <Select
+                                    value={formValues[f.key] || "none"}
+                                    onValueChange={(v) => setFormValues((prev) => ({ ...prev, [f.key]: v === "none" ? "" : v }))}
+                                  >
+                                    <SelectTrigger id={f.key} className="h-8">
+                                      <SelectValue placeholder="Select" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      <SelectItem value="none">—</SelectItem>
+                                      {(f.key === "fty_md_user_id" ? ftyUsers : costingUsers).map((u) => (
+                                        <SelectItem key={u.id} value={String(u.id)}>
+                                          {u.full_name?.trim() || u.username}
+                                        </SelectItem>
+                                      ))}
+                                    </SelectContent>
+                                  </Select>
+                                ) : (
+                                  <Input
+                                    id={f.key}
+                                    value={getUserLabel(formValues[f.key]) || user?.full_name || user?.username || ""}
+                                    readOnly
+                                    disabled
+                                    className="h-8 text-sm"
+                                  />
+                                )
+                              )}
                               {fieldErrors[f.key] && (
                                 <p className="text-destructive text-xs">{fieldErrors[f.key]}</p>
                               )}
@@ -782,7 +955,7 @@ export default function SampleStageEditPage() {
                 })
               })()}
               <div className="flex gap-2 pt-1">
-                <Button type="submit" disabled={saving} size="sm">
+                <Button type="submit" disabled={saving || !validationState.canSubmit} size="sm">
                   {saving ? "Saving..." : "Save Stage"}
                 </Button>
                 <Button type="button" variant="outline" onClick={() => navigate(`/samples/${id}`)} size="sm">

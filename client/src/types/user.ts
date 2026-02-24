@@ -5,6 +5,7 @@ export interface User {
   email: string
   full_name: string | null
   department: string | null
+  region: "US" | "PH" | "INDONESIA"
   role_id: number | null
   roleCode?: string
   roleName?: string
@@ -18,6 +19,7 @@ export interface CreateUserInput {
   email: string
   full_name?: string
   department?: string
+  region?: "US" | "PH" | "INDONESIA"
   role_id?: number | null
   is_active?: boolean
   password?: string
@@ -28,6 +30,7 @@ export interface UpdateUserInput {
   email?: string
   full_name?: string
   department?: string
+  region?: "US" | "PH" | "INDONESIA"
   role_id?: number | null
   is_active?: boolean
 }

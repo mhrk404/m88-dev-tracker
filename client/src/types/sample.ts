@@ -38,6 +38,33 @@ export interface Sample {
   divisions?: { name: string } | null
   product_categories?: { name: string } | null
   sample_types?: { name: string; group: string } | null
+  team_assignment?: {
+    assignment_id?: number
+    pbd_user_id?: number | null
+    td_user_id?: number | null
+    fty_user_id?: number | null
+    fty_md2_user_id?: number | null
+    md_user_id?: number | null
+    costing_user_id?: number | null
+    pbd?: { full_name?: string | null } | null
+    td?: { full_name?: string | null } | null
+    fty_md2?: { full_name?: string | null } | null
+    md?: { full_name?: string | null } | null
+    costing?: { full_name?: string | null } | null
+  }[] | {
+    assignment_id?: number
+    pbd_user_id?: number | null
+    td_user_id?: number | null
+    fty_user_id?: number | null
+    fty_md2_user_id?: number | null
+    md_user_id?: number | null
+    costing_user_id?: number | null
+    pbd?: { full_name?: string | null } | null
+    td?: { full_name?: string | null } | null
+    fty_md2?: { full_name?: string | null } | null
+    md?: { full_name?: string | null } | null
+    costing?: { full_name?: string | null } | null
+  } | null
 }
 
 export interface StageData {
@@ -91,7 +118,6 @@ export interface SampleFull extends Sample {
     sample_development: StageData | null
     pc_review: StageData | null
     costing: StageData | null
-    scf: StageData | null
     shipment_to_brand: StageData | null
   }
   shipping: ShippingTracking[]

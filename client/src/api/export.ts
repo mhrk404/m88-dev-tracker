@@ -1,5 +1,7 @@
 import apiClient from "./client"
 
+export type ExportFormat = "csv" | "xlsx"
+
 function filenameFromContentDisposition(contentDisposition: string | undefined | null): string | null {
   if (!contentDisposition) return null
   // Examples:
@@ -10,16 +12,23 @@ function filenameFromContentDisposition(contentDisposition: string | undefined |
   return decodeURIComponent(match[1].trim())
 }
 
-export async function exportSamplesCsv(params?: { season_id?: number; brand_id?: number }) {
+export async function exportSamples(
+  params?: { season_id?: number; brand_id?: number; format?: ExportFormat },
+) {
+  const format = params?.format ?? "csv"
   const res = await apiClient.get<Blob>("/export/samples", {
-    params: { format: "csv", ...params },
+    params: { ...params, format },
     responseType: "blob",
   })
 
-  const contentType = res.headers?.["content-type"] || "text/csv"
+  const contentType =
+    res.headers?.["content-type"] ||
+    (format === "xlsx"
+      ? "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+      : "text/csv")
   const filename =
     filenameFromContentDisposition(res.headers?.["content-disposition"]) ||
-    `samples_${new Date().toISOString().slice(0, 10)}.csv`
+    `samples_${new Date().toISOString().slice(0, 10)}.${format}`
 
   const blob = new Blob([res.data], { type: contentType })
   return { blob, filename }

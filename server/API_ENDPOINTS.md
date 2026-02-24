@@ -38,8 +38,8 @@ Base URL: **http://localhost:5000/api**
 
 | Method | Endpoint | Auth | Body / Params | Description |
 |--------|----------|------|---------------|-------------|
-| **GET** | `/api/samples/:id/stages` | Yes | — | Get data for all 6 stages of a sample |
-| **PUT** | `/api/stages/:id` | Yes | `stage` (REQUIRED), + stage-specific fields | Update stage data. `stage` must be: `psi`, `sample_development`, `pc_review`, `costing`, `scf`, `shipment_to_brand`. |
+| **GET** | `/api/samples/:id/stages` | Yes | — | Get data for all stages of a sample |
+| **PUT** | `/api/stages/:id` | Yes | `stage` (REQUIRED), + stage-specific fields | Update stage data. `stage` must be: `psi`, `sample_development`, `pc_review`, `costing`, `shipment_to_brand`. |
 
 ---
 
