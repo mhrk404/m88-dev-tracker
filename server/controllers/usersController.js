@@ -35,6 +35,13 @@ async function getRoleCodeById(roleId) {
   return (data?.code || '').toUpperCase() || null;
 }
 
+function canAssignRole(req, assignedRoleCode) {
+  if (!assignedRoleCode) return true;
+  if (assignedRoleCode === 'SUPER_ADMIN') return isSuperAdmin(req);
+  if (assignedRoleCode === 'ADMIN') return isSuperAdmin(req);
+  return true;
+}
+
 export const list = async (req, res) => {
   try {
     let query = supabase.from('users').select(`${USER_SELECT}, roles(code, name)`).order('username');
@@ -79,14 +86,18 @@ export const create = async (req, res) => {
       return res.status(403).json({ error: 'You can only create users within your region' });
     }
 
+    let assignedRoleCode = null;
     if (role_id !== undefined && role_id !== null) {
-      const assignedRoleCode = await getRoleCodeById(role_id);
+      assignedRoleCode = await getRoleCodeById(role_id);
       if (!assignedRoleCode) return res.status(400).json({ error: 'Invalid role_id' });
-      if (assignedRoleCode === 'SUPER_ADMIN' && !isSuperAdmin(req)) {
-        return res.status(403).json({ error: 'Only super admin can assign SUPER_ADMIN role' });
+      if (!canAssignRole(req, assignedRoleCode)) {
+        return res.status(403).json({ error: `Only super admin can assign ${assignedRoleCode} role` });
+      }
+      if (assignedRoleCode === 'ADMIN' && !normalizeRegion(region)) {
+        return res.status(400).json({ error: 'region is required when creating an ADMIN account' });
       }
     }
-    
+
     let payload = {
       username: username.trim(),
       email: email.trim().toLowerCase(),
@@ -145,8 +156,16 @@ export const update = async (req, res) => {
     if (role_id !== undefined && role_id !== null) {
       const assignedRoleCode = await getRoleCodeById(role_id);
       if (!assignedRoleCode) return res.status(400).json({ error: 'Invalid role_id' });
-      if (assignedRoleCode === 'SUPER_ADMIN' && !isSuperAdmin(req)) {
-        return res.status(403).json({ error: 'Only super admin can assign SUPER_ADMIN role' });
+      if (!canAssignRole(req, assignedRoleCode)) {
+        return res.status(403).json({ error: `Only super admin can assign ${assignedRoleCode} role` });
+      }
+
+      const targetRegion = normalizeRegion(updates.region ?? existing.region);
+      if (assignedRoleCode === 'ADMIN') {
+        if (!targetRegion || !isValidRegion(targetRegion)) {
+          return res.status(400).json({ error: 'ADMIN account must have a valid region: US, PH, INDONESIA' });
+        }
+        updates.region = targetRegion;
       }
     }
     if (is_active !== undefined) updates.is_active = !!is_active;

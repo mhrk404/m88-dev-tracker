@@ -200,8 +200,16 @@ export default function UsersPage() {
   const assignableRoles = useMemo(() => {
     const roles = lookups?.roles ?? []
     if (canManageAllRegions) return roles
-    return roles.filter((r) => r.code !== ROLES.SUPER_ADMIN)
+    return roles.filter((r) => r.code !== ROLES.SUPER_ADMIN && r.code !== ROLES.ADMIN)
   }, [lookups?.roles, canManageAllRegions])
+
+  const roleCodeById = useMemo(() => {
+    const map = new Map<number, string>()
+    ;(lookups?.roles ?? []).forEach((role) => {
+      map.set(role.id, role.code)
+    })
+    return map
+  }, [lookups?.roles])
 
   const [page, setPage] = useState(1)
 
@@ -239,6 +247,13 @@ export default function UsersPage() {
     if (!createForm.username?.trim()) return toast.error("Username is required")
     if (!createForm.email?.trim()) return toast.error("Email is required")
 
+    if (!canManageAllRegions && createForm.role_id != null) {
+      const selectedRoleCode = roleCodeById.get(createForm.role_id)
+      if (selectedRoleCode === ROLES.ADMIN || selectedRoleCode === ROLES.SUPER_ADMIN) {
+        return toast.error("Only super admin can assign ADMIN or SUPER_ADMIN roles")
+      }
+    }
+
     setSaving(true)
     try {
       await createUser({
@@ -271,15 +286,29 @@ export default function UsersPage() {
       return toast.error("Email is required")
     }
 
+    const selectedRoleId = editForm.role_id
+    if (!canManageAllRegions && selectedRoleId != null) {
+      const selectedRoleCode = roleCodeById.get(selectedRoleId)
+      if (selectedRoleCode === ROLES.ADMIN || selectedRoleCode === ROLES.SUPER_ADMIN) {
+        return toast.error("Only super admin can assign ADMIN or SUPER_ADMIN roles")
+      }
+    }
+
     setSaving(true)
     try {
-      await updateUser(editUser.id, {
+      const updatePayload: UpdateUserInput = {
         ...editForm,
         username: editForm.username?.trim(),
         email: editForm.email?.trim(),
         full_name: editForm.full_name?.trim() || undefined,
         region: (canManageAllRegions ? editForm.region : currentUser?.region) as RegionCode,
-      })
+      }
+
+      if (updatePayload.role_id === editUser.role_id) {
+        delete updatePayload.role_id
+      }
+
+      await updateUser(editUser.id, updatePayload)
       toast.success("User updated")
       setEditOpen(false)
       setEditUser(null)
@@ -294,7 +323,7 @@ export default function UsersPage() {
   }
 
   function openDelete(u: User) {
-    if (isAdministrativeRole(u.roleCode)) {
+    if (isAdministrativeRole(u.roleCode) && !canManageAllRegions) {
       toast.error("Cannot delete administrative users")
       return
     }
@@ -377,7 +406,9 @@ export default function UsersPage() {
     if (selectedIds.size === 0) return
     const usersToDelete = Array.from(selectedIds).filter((id) => {
       const user = users.find((u) => u.id === id)
-      return user && !isAdministrativeRole(user.roleCode)
+      if (!user) return false
+      if (canManageAllRegions) return true
+      return !isAdministrativeRole(user.roleCode)
     })
 
     if (usersToDelete.length === 0) {
@@ -597,7 +628,7 @@ export default function UsersPage() {
                               variant="ghost"
                               size="icon-xs"
                               onClick={() => openDelete(u)}
-                              disabled={isAdministrativeRole(u.roleCode)}
+                              disabled={isAdministrativeRole(u.roleCode) && !canManageAllRegions}
                             >
                               <Trash2 className="h-4 w-4 text-destructive" />
                             </Button>
