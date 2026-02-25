@@ -112,6 +112,30 @@ export interface StatusTransition {
   notes: string | null
 }
 
+export interface SampleRoleOwner {
+  sample_role_owner_id: number
+  sample_id: string
+  role_key:
+    | "PBD_SAMPLE_CREATION"
+    | "TD_PSI_INTAKE"
+    | "FTY_MD_DEVELOPMENT"
+    | "MD_M88_DECISION"
+    | "COSTING_TEAM_COST_SHEET"
+    | "PBD_BRAND_TRACKING"
+  user_id: number | null
+  entered_by: number | null
+  entered_at: string
+  created_at: string
+  updated_at: string
+  user?: {
+    id: number
+    username: string
+    full_name: string | null
+    role_id: number | null
+    region: "US" | "PH" | "INDONESIA"
+  } | null
+}
+
 export interface SampleFull extends Sample {
   stages: {
     psi: StageData | null
@@ -120,6 +144,8 @@ export interface SampleFull extends Sample {
     costing: StageData | null
     shipment_to_brand: StageData | null
   }
+  sample_role_owners?: SampleRoleOwner[]
+  sample_role_owners_map?: Partial<Record<SampleRoleOwner["role_key"], SampleRoleOwner>>
   shipping: ShippingTracking[]
   history: SampleHistory[]
   status_transitions: StatusTransition[]

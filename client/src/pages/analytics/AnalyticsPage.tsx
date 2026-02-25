@@ -23,7 +23,6 @@ import { listBrands } from "@/api/brands"
 import type {
   DeliveryPerformanceResponse,
   PerformanceByBrand,
-  PerformanceSummary,
   PerformanceTrendPoint,
 } from "@/types/analytics"
 import type { Brand } from "@/types/lookups"
@@ -78,11 +77,6 @@ type ExportSectionKey = (typeof EXPORT_SECTION_OPTIONS)[number]["key"]
 
 const formatPct = (value: number) => `${value.toFixed(1)}%`
 
-const onTimePercentFor = (row: PerformanceByBrand) => {
-  const completed = row.early + row.on_time + row.delay
-  return completed ? Math.round((row.on_time / completed) * 1000) / 10 : 0
-}
-
 const colorForPercent = (value: number) => {
   const clamped = Math.min(100, Math.max(0, value)) / 100
   const r = Math.round(239 + (16 - 239) * clamped)
@@ -91,13 +85,17 @@ const colorForPercent = (value: number) => {
   return `rgba(${r}, ${g}, ${b}, 0.85)`
 }
 
-function SummaryKpis({ summary }: {
-  summary: PerformanceSummary
+function SummaryKpis({
+  total,
+  efficiency,
+  earlyPct,
+  delayedPct,
+}: {
+  total: number
+  efficiency: number
+  earlyPct: number
+  delayedPct: number
 }) {
-  const total = summary.total
-  const efficiency = summary.percentage?.on_time ?? 0
-  const earlyPct = summary.percentage?.early ?? 0
-  const delayedPct = summary.percentage?.delay ?? 0
 
   return (
     <Card>
@@ -435,18 +433,19 @@ export default function AnalyticsPage() {
     if (!delivery?.byBrand) return []
     return delivery.byBrand.map((row) => {
       const totalCompleted = row.early + row.on_time + row.delay
+      const onTimePct = totalCompleted ? Math.round((row.on_time / totalCompleted) * 1000) / 10 : 0
       const totalStyles = row.style_count ?? totalCompleted
       return {
         ...row,
         totalCompleted,
-        onTimePct: onTimePercentFor(row),
+        onTimePct,
         totalStyles,
       }
     })
   }, [delivery])
 
   const filteredRows = useMemo(() => {
-    let rows = rowsWithPct
+    let rows = rowsWithPct.filter((row) => row.totalCompleted > 0)
     if (statusFilter !== "all") {
       rows = rows.filter((row) => row[statusFilter as "early" | "on_time" | "delay"] > 0)
     }
@@ -456,6 +455,20 @@ export default function AnalyticsPage() {
     }
     return rows
   }, [rowsWithPct, statusFilter, threshold])
+
+  const completedSummary = useMemo(() => {
+    const early = rowsWithPct.reduce((sum, row) => sum + row.early, 0)
+    const onTime = rowsWithPct.reduce((sum, row) => sum + row.on_time, 0)
+    const delay = rowsWithPct.reduce((sum, row) => sum + row.delay, 0)
+    const total = early + onTime + delay
+
+    return {
+      total,
+      efficiency: total ? (onTime / total) * 100 : 0,
+      earlyPct: total ? (early / total) * 100 : 0,
+      delayedPct: total ? (delay / total) * 100 : 0,
+    }
+  }, [rowsWithPct])
 
   const clearFilters = () => {
     setBrandId("")
@@ -505,10 +518,10 @@ export default function AnalyticsPage() {
           sections.push(`
             <h2>Summary KPIs</h2>
             <table style="border-collapse:collapse;width:100%;margin-bottom:12px;">
-              ${formatRow("Total Deliveries", delivery.summary.total.toLocaleString())}
-              ${formatRow("Overall On-Time", formatPct(delivery.summary.percentage?.on_time ?? 0))}
-              ${formatRow("Early %", formatPct(delivery.summary.percentage?.early ?? 0))}
-              ${formatRow("Delayed %", formatPct(delivery.summary.percentage?.delay ?? 0))}
+              ${formatRow("Total Deliveries", completedSummary.total.toLocaleString())}
+              ${formatRow("Overall On-Time", formatPct(completedSummary.efficiency))}
+              ${formatRow("Early %", formatPct(completedSummary.earlyPct))}
+              ${formatRow("Delayed %", formatPct(completedSummary.delayedPct))}
             </table>
           `)
         }
@@ -735,7 +748,12 @@ export default function AnalyticsPage() {
       )}
 
       {delivery ? (
-        <SummaryKpis summary={delivery.summary} />
+        <SummaryKpis
+          total={completedSummary.total}
+          efficiency={completedSummary.efficiency}
+          earlyPct={completedSummary.earlyPct}
+          delayedPct={completedSummary.delayedPct}
+        />
       ) : null}
 
       <Card>

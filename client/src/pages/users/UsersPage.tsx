@@ -94,6 +94,7 @@ export default function UsersPage() {
   const [search, setSearch] = useState("")
   const [roleFilter, setRoleFilter] = useState<string>("all")
   const [activeFilter, setActiveFilter] = useState<ActiveFilter>("all")
+  const [regionFilter, setRegionFilter] = useState<string>("all")
 
   const [createOpen, setCreateOpen] = useState(false)
   const [editOpen, setEditOpen] = useState(false)
@@ -188,9 +189,13 @@ export default function UsersPage() {
         activeFilter === "all" ||
         (activeFilter === "active" ? u.is_active : !u.is_active)
 
-      return matchesQuery && matchesRole && matchesActive
+      const matchesRegion =
+        regionFilter === "all" ||
+        u.region === regionFilter
+
+      return matchesQuery && matchesRole && matchesActive && matchesRegion
     })
-  }, [users, search, roleFilter, activeFilter, canManageAllRegions, currentUser?.region])
+  }, [users, search, roleFilter, activeFilter, regionFilter, canManageAllRegions, currentUser?.region])
 
   const assignableRoles = useMemo(() => {
     const roles = lookups?.roles ?? []
@@ -202,7 +207,7 @@ export default function UsersPage() {
 
   useEffect(() => {
     setPage(1)
-  }, [search, roleFilter, activeFilter])
+  }, [search, roleFilter, activeFilter, regionFilter])
 
   const totalPages = Math.max(1, Math.ceil(filteredUsers.length / USERS_PAGE_SIZE))
   const safePage = Math.min(Math.max(page, 1), totalPages)
@@ -460,6 +465,22 @@ export default function UsersPage() {
                   ))}
                 </SelectContent>
               </Select>
+
+              {canManageAllRegions && (
+                <Select value={regionFilter} onValueChange={setRegionFilter}>
+                  <SelectTrigger className="w-[180px]">
+                    <SelectValue placeholder="Region" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Regions</SelectItem>
+                    {REGION_OPTIONS.map((region) => (
+                      <SelectItem key={region} value={region}>
+                        {region}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
 
             </div>
           </CardContent>

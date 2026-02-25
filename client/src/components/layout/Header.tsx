@@ -50,7 +50,7 @@ export default function Header() {
   const showCreateUserButton = location.pathname === "/users" && canCreateUsers
 
   return (
-    <header className="flex h-16 items-center justify-between border-b dark:border-opacity-30 bg-background px-6">
+    <header className="flex h-16 items-center justify-between border-b dark:border-opacity-30 bg-background px-6 gradient-dark-header">
       <h1 className="text-xl font-semibold text-foreground">{title}</h1>
       {showCreateSampleButton ? (
         <Button onClick={() => navigate("/samples/new")} size="sm">

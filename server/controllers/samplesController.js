@@ -1,6 +1,7 @@
 import { supabase } from '../config/supabase.js';
 import { logAudit, auditMeta } from '../services/auditService.js';
 import { STAGE_TABLES, getStagesForRole } from '../middleware/rbac.js';
+import { SAMPLE_ROLE_KEYS, getSampleRoleOwners, setSampleRoleOwner } from '../services/sampleRoleOwnersService.js';
 
 /** sample_request with style and team_assignment. */
 const SAMPLE_REQUEST_SELECT = `
@@ -57,8 +58,57 @@ function flattenSample(s) {
 
 const flattenList = (list) => (list || []).map(flattenSample);
 
+function assignmentRoleOwnerUpdates(sampleId, assignment, fallbackPbdUserId = null) {
+  return [
+    {
+      sampleId,
+      roleKey: SAMPLE_ROLE_KEYS.PBD_SAMPLE_CREATION,
+      userId: assignment?.pbd_user_id ?? fallbackPbdUserId ?? null,
+    },
+    {
+      sampleId,
+      roleKey: SAMPLE_ROLE_KEYS.TD_PSI_INTAKE,
+      userId: assignment?.td_user_id ?? null,
+    },
+    {
+      sampleId,
+      roleKey: SAMPLE_ROLE_KEYS.FTY_MD_DEVELOPMENT,
+      userId: assignment?.fty_md2_user_id ?? assignment?.fty_user_id ?? null,
+    },
+    {
+      sampleId,
+      roleKey: SAMPLE_ROLE_KEYS.MD_M88_DECISION,
+      userId: assignment?.md_user_id ?? null,
+    },
+    {
+      sampleId,
+      roleKey: SAMPLE_ROLE_KEYS.COSTING_TEAM_COST_SHEET,
+      userId: assignment?.costing_user_id ?? null,
+    },
+    {
+      sampleId,
+      roleKey: SAMPLE_ROLE_KEYS.PBD_BRAND_TRACKING,
+      userId: assignment?.pbd_user_id ?? fallbackPbdUserId ?? null,
+    },
+  ];
+}
+
+function roleOwnerMapByKey(roleOwners) {
+  const map = {};
+  for (const row of roleOwners || []) {
+    map[row.role_key] = row;
+  }
+  return map;
+}
+
 function normalizeStage(stage) {
   return typeof stage === 'string' ? stage.trim().toLowerCase() : null;
+}
+
+function isCanceledLike(value) {
+  if (value == null) return false;
+  const normalized = String(value).trim().toLowerCase();
+  return normalized === 'cancel' || normalized === 'canceled' || normalized === 'cancelled' || normalized === 'dropped';
 }
 
 function visibleStagesForRole(roleCode) {
@@ -209,9 +259,10 @@ export const getFull = async (req, res) => {
 
     const auditPromise = supabase.from('stage_audit_log').select('*').eq('sample_id', sampleId).order('timestamp', { ascending: false });
 
-    const [stageResults, audit] = await Promise.all([
+    const [stageResults, audit, roleOwners] = await Promise.all([
       Promise.all(stagePromises),
       auditPromise,
+      getSampleRoleOwners(sampleId),
     ]);
 
     // Return all stage data for full view (used by detail page Additional Info)
@@ -266,6 +317,8 @@ export const getFull = async (req, res) => {
     return res.json({
       ...flat,
       stages,
+      sample_role_owners: roleOwners,
+      sample_role_owners_map: roleOwnerMapByKey(roleOwners),
       shipping,
       history,
       status_transitions
@@ -403,7 +456,7 @@ export const create = async (req, res) => {
       unfree_status: unfree_status?.trim() || null,
       sample_type: sample_type?.trim() || null,
       sample_type_group: sample_type_group?.trim() || null,
-      sample_status: 'Initiated',
+      sample_status: 'Active',
       kickoff_date: kickoff_date || null,
       sample_due_denver: sample_due_denver || null,
       requested_lead_time: (computedLead != null) ? Number(computedLead) : (requested_lead_time != null ? Number(requested_lead_time) : null),
@@ -413,7 +466,7 @@ export const create = async (req, res) => {
       additional_notes: additional_notes?.trim() || null,
       key_date: key_date || null,
       current_stage: 'PSI',
-      current_status: 'PENDING',
+      current_status: 'Pending',
       created_by: createdBy,
     };
 
@@ -444,6 +497,9 @@ export const create = async (req, res) => {
 
     await supabase.from('sample_request').update({ assignment_id: assignRow.assignment_id }).eq('sample_id', sampleId);
 
+    const roleOwnerUpdates = assignmentRoleOwnerUpdates(sampleId, assignPayload, createdBy);
+    await Promise.all(roleOwnerUpdates.map((item) => setSampleRoleOwner({ ...item, enteredBy: createdBy })));
+
     const { data: dataFull, error: fetchErr } = await supabase
       .from('sample_request')
       .select(SAMPLE_REQUEST_SELECT)
@@ -453,7 +509,7 @@ export const create = async (req, res) => {
 
     const { ip, userAgent } = auditMeta(req);
     await logAudit({ userId: req.user?.id, action: 'create', resource: 'sample', resourceId: sampleId, details: { sample_id: sampleId }, ip, userAgent });
-    await recordHistory(sampleId, 'sample_request', 'create', null, 'Initiated', createdBy, 'Sample created');
+    await recordHistory(sampleId, 'sample_request', 'create', null, 'Active', createdBy, 'Sample created');
 
     return res.status(201).json(flattenSample(dataFull));
   } catch (err) {
@@ -482,11 +538,6 @@ export const update = async (req, res) => {
       }
     }
 
-    // Heuristic: if status is DELIVERED, advance stage to shipment_to_brand if not already passed
-    if (updates.current_status?.toUpperCase() === 'DELIVERED' && (!updates.current_stage || updates.current_stage === 'psi')) {
-      updates.current_stage = 'shipment_to_brand';
-    }
-
     const styleFields = ['brand_id', 'season_id', 'style_number', 'style_name', 'division', 'product_category', 'color', 'qty', 'coo'];
     const styleUpdates = {};
     for (const f of styleFields) {
@@ -513,7 +564,18 @@ export const update = async (req, res) => {
         if (a.fty_md2_user_id !== undefined) assignUpdates.fty_md2_user_id = a.fty_md2_user_id != null ? Number(a.fty_md2_user_id) : null;
         if (a.md_user_id !== undefined) assignUpdates.md_user_id = a.md_user_id != null ? Number(a.md_user_id) : null;
         if (a.costing_user_id !== undefined) assignUpdates.costing_user_id = a.costing_user_id != null ? Number(a.costing_user_id) : null;
-        if (Object.keys(assignUpdates).length) await supabase.from('team_assignment').update(assignUpdates).eq('sample_id', sampleId);
+        if (Object.keys(assignUpdates).length) {
+          await supabase.from('team_assignment').update(assignUpdates).eq('sample_id', sampleId);
+
+          const { data: latestAssignment } = await supabase
+            .from('team_assignment')
+            .select('pbd_user_id, td_user_id, fty_user_id, fty_md2_user_id, md_user_id, costing_user_id')
+            .eq('sample_id', sampleId)
+            .maybeSingle();
+
+          const roleOwnerUpdates = assignmentRoleOwnerUpdates(sampleId, latestAssignment, req.user?.id ?? null);
+          await Promise.all(roleOwnerUpdates.map((item) => setSampleRoleOwner({ ...item, enteredBy: req.user?.id ?? null })));
+        }
       }
     }
 
@@ -529,13 +591,20 @@ export const update = async (req, res) => {
       ? updates.current_stage.trim().toLowerCase()
       : updates.current_stage;
 
-    // Business rule: once stage reaches delivered_confirmation, status is completed
-    if (nextStage === 'delivered_confirmation') {
-      updates.current_status = 'COMPLETED';
-    }
+    const canceledInRequest = isCanceledLike(updates.current_status)
+      || isCanceledLike(updates.sample_status);
 
-    if (nextStage && nextStage !== oldStage) {
-      updates.sample_status = 'In Progress';
+    if (canceledInRequest) {
+      updates.current_status = 'Dropped';
+      updates.sample_status = 'Dropped';
+    } else if (nextStage && nextStage !== oldStage) {
+      if (nextStage === 'shipment_to_brand' || nextStage === 'delivered_confirmation') {
+        updates.current_status = 'Delivered';
+        updates.sample_status = 'Completed';
+      } else {
+        updates.current_status = 'Processing';
+        updates.sample_status = 'Processing';
+      }
     }
 
     // If kickoff_date/sample_due_denver are present (either in updates or existing), compute requested_lead_time on server

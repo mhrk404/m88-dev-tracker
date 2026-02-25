@@ -14,6 +14,9 @@ import divisions from './divisions.js';
 import productCategories from './product-categories.js';
 import sampleTypes from './sample-types.js';
 import roles from './roles.js';
+import { authenticate } from '../middleware/auth.js';
+import { requireAdmin } from '../middleware/rbac.js';
+import * as auditCtrl from '../controllers/auditController.js';
 
 const router = express.Router();
 
@@ -24,7 +27,13 @@ router.use('/seasons', seasons);
 router.use('/styles', styles);
 router.use('/samples', samples);
 router.use('/stages/:sampleId', stages);
+
+// System-wide activity logs (top-level, before parameterized audit route)
+router.get('/activity-logs', authenticate, requireAdmin, auditCtrl.getAllActivityLogs);
+
+// Sample-specific audit logs
 router.use('/audit/:sampleId', audit);
+
 router.use('/analytics', analytics);
 router.use('/export', exportRoutes);
 router.use('/lookups', lookups);

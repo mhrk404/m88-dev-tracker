@@ -12,6 +12,13 @@ import {
   HelpCircle,
   Moon,
   Sun,
+  Truck,
+  Calculator,
+  FileText,
+  Factory,
+  ClipboardCheck,
+  PackageCheck,
+  Activity,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useAuth } from "@/contexts/auth"
@@ -26,10 +33,23 @@ const mainNavItems = [
   { href: "/analytics", label: "Analytics", icon: BarChart3 },
 ]
 
+const pbdOnlyItems = [{ href: "/pbd/monitoring", label: "PBD Monitoring", icon: Truck }]
+
+const costingOnlyItems = [{ href: "/costing/monitoring", label: "Costing Monitoring", icon: Calculator }]
+
+const tdOnlyItems = [{ href: "/td/monitoring", label: "TD Monitoring", icon: FileText }]
+
+const ftyOnlyItems = [{ href: "/fty/monitoring", label: "Factory Monitoring", icon: Factory }]
+
+const mdOnlyItems = [{ href: "/md/monitoring", label: "MD Monitoring", icon: ClipboardCheck }]
+
+const brandOnlyItems = [{ href: "/brand/monitoring", label: "Brand Monitoring", icon: PackageCheck }]
+
 const adminOnlyItems = [
   { href: "/users", label: "Users", icon: Users },
   { href: "/lookups", label: "Lookups", icon: Settings },
   { href: "/role-access", label: "Role Access", icon: Settings },
+  { href: "/activity-logs", label: "Activity Logs", icon: Activity },
 ]
 
 const otherItems = [{ href: "/help", label: "Help Center", icon: HelpCircle }]
@@ -46,7 +66,35 @@ export default function Sidebar({ collapsed, onToggleCollapsed }: SidebarProps) 
   const { theme, toggleTheme } = useTheme()
 
   const canSeeAdmin = !!user && canManageUsers(user.roleCode as any)
-  const navItems = canSeeAdmin ? [...mainNavItems, ...adminOnlyItems] : mainNavItems
+  const isPBD = user?.roleCode === "PBD"
+  const isCosting = user?.roleCode === "COSTING"
+  const isTD = user?.roleCode === "TD"
+  const isFTY = user?.roleCode === "FTY"
+  const isMD = user?.roleCode === "MD"
+  const isBRAND = user?.roleCode === "BRAND"
+  
+  let navItems = [...mainNavItems]
+  if (isPBD) {
+    navItems = [...navItems, ...pbdOnlyItems]
+  }
+  if (isCosting) {
+    navItems = [...navItems, ...costingOnlyItems]
+  }
+  if (isTD) {
+    navItems = [...navItems, ...tdOnlyItems]
+  }
+  if (isFTY) {
+    navItems = [...navItems, ...ftyOnlyItems]
+  }
+  if (isMD) {
+    navItems = [...navItems, ...mdOnlyItems]
+  }
+  if (isBRAND) {
+    navItems = [...navItems, ...brandOnlyItems]
+  }
+  if (canSeeAdmin) {
+    navItems = [...navItems, ...adminOnlyItems]
+  }
 
   async function handleLogout() {
     await logout()
@@ -56,7 +104,7 @@ export default function Sidebar({ collapsed, onToggleCollapsed }: SidebarProps) 
   return (
     <div
       className={cn(
-        "flex h-full flex-col border-r bg-sidebar transition-[width] duration-200",
+        "flex h-full flex-col border-r bg-sidebar transition-[width] duration-200 gradient-dark-sidebar",
         collapsed ? "w-16" : "w-72"
       )}
     >
@@ -66,7 +114,7 @@ export default function Sidebar({ collapsed, onToggleCollapsed }: SidebarProps) 
             <img
               src={logoImage}
               alt="Madison 88"
-              className="h-8 w-auto dark:brightness-0 dark:invert"
+              className="h-14 w-auto dark:brightness-0 dark:invert"
             />
           </div>
         )}

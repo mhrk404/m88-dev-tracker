@@ -66,15 +66,6 @@ const STAGE_LABELS: Record<string, string> = {
   [STAGES.DELIVERED_CONFIRMATION]: "Delivered Confirmation",
 }
 
-const STAGE_OPTIONS = [
-  { value: STAGES.PSI, label: "PSI Intake (Business Development)" },
-  { value: STAGES.SAMPLE_DEVELOPMENT, label: "Factory Development Updates" },
-  { value: STAGES.PC_REVIEW, label: "MD / Product Review Decision" },
-  { value: STAGES.COSTING, label: "Cost Sheet Processing" },
-  { value: STAGES.SHIPMENT_TO_BRAND, label: "Brand Delivery Tracking" },
-  { value: STAGES.DELIVERED_CONFIRMATION, label: "Delivered Confirmation" },
-] as const
-
 const STAGE_ORDER: string[] = [
   STAGES.PSI,
   STAGES.SAMPLE_DEVELOPMENT,
@@ -157,10 +148,10 @@ function paletteForStatus(status: string) {
 function statusDotClass(status: string | null | undefined): string {
   if (!status) return "bg-muted-foreground/40"
   const s = normalizeStatus(status)
-  if (s.includes("delay") || s.includes("late") || s.includes("blocked") || s.includes("hold")) return "bg-red-500"
+  if (s.includes("delay") || s.includes("late") || s.includes("blocked") || s.includes("hold") || s.includes("drop") || s.includes("cancel")) return "bg-red-500"
   if (s.includes("pending") || s.includes("waiting") || s.includes("review")) return "bg-amber-500"
   if (s.includes("progress") || s.includes("development") || s.includes("active")) return "bg-blue-500"
-  if (s.includes("delivered")) return "bg-sky-500"
+  if (s.includes("delivered")) return "bg-emerald-500"
   if (s.includes("complete") || s.includes("done")) return "bg-emerald-500"
   if (s.includes("approved")) return "bg-emerald-500"
   return paletteForStatus(status).dot
@@ -169,10 +160,10 @@ function statusDotClass(status: string | null | undefined): string {
 function statusBadgeClass(status: string | null | undefined): string {
   if (!status) return "border-muted-foreground/20 text-muted-foreground"
   const s = normalizeStatus(status)
-  if (s.includes("delay") || s.includes("late") || s.includes("blocked") || s.includes("hold")) return "border-red-200 text-red-700 dark:border-red-900/40 dark:text-red-300"
+  if (s.includes("delay") || s.includes("late") || s.includes("blocked") || s.includes("hold") || s.includes("drop") || s.includes("cancel")) return "border-red-200 text-red-700 dark:border-red-900/40 dark:text-red-300"
   if (s.includes("pending") || s.includes("waiting") || s.includes("review")) return "border-amber-200 text-amber-700 dark:border-amber-900/40 dark:text-amber-300"
   if (s.includes("progress") || s.includes("development") || s.includes("active")) return "border-blue-200 text-blue-700 dark:border-blue-900/40 dark:text-blue-300"
-  if (s.includes("delivered")) return "border-sky-200 text-sky-700 dark:border-sky-900/40 dark:text-sky-300"
+  if (s.includes("delivered")) return "border-emerald-200 text-emerald-700 dark:border-emerald-900/40 dark:text-emerald-300"
   if (s.includes("complete") || s.includes("done")) return "border-emerald-200 text-emerald-700 dark:border-emerald-900/40 dark:text-emerald-300"
   if (s.includes("approved")) return "border-emerald-200 text-emerald-700 dark:border-emerald-900/40 dark:text-emerald-300"
   return paletteForStatus(status).badge
@@ -181,9 +172,11 @@ function statusBadgeClass(status: string | null | undefined): string {
 function simplifyStatus(status: string | null | undefined): string {
   if (!status) return "-"
   const s = normalizeStatus(status)
+  if (s.includes("drop") || s.includes("cancel")) return "Dropped"
   if (s.includes("deliver")) return "Delivered"
   if (s.includes("complete") || s.includes("done") || s.includes("approve")) return "Completed"
   if (s.includes("pending") || s.includes("waiting") || s.includes("review")) return "Pending"
+  if (s.includes("active")) return "Active"
   return "Processing"
 }
 
@@ -377,6 +370,13 @@ export default function SamplesListPage() {
     }
     return Array.from(set).sort((a, b) => a.localeCompare(b))
   }, [samples])
+
+  const editableStatuses = useMemo(() => {
+    const set = new Set<string>(availableStatuses)
+    set.add("Active")
+    set.add("Dropped")
+    return Array.from(set).sort((a, b) => a.localeCompare(b))
+  }, [availableStatuses])
 
   const availableSeasons = useMemo(() => {
     const byId = new Map<number, string>()
@@ -850,7 +850,7 @@ export default function SamplesListPage() {
                         <td className="h-12 px-2 align-middle">{sample.style_name || "-"}</td>
                         <td className="h-12 px-2 align-middle">{sample.color || "-"}</td>
                         <td className="h-12 px-2 align-middle">
-                          {sample.seasons ? `${sample.seasons.code || sample.seasons.name} ${sample.seasons.year}` : "-"}
+                          {sample.seasons ? `${sample.seasons.code || sample.seasons.name}` : "-"}
                         </td>
                         <td className="h-12 px-2 align-middle">{sample.brands?.name || "-"}</td>
                         <td className="h-12 px-2 align-middle">{sample.division || "-"}</td>
@@ -869,7 +869,35 @@ export default function SamplesListPage() {
                         </td>
                         <td className="h-12 px-2 align-middle">
                           {sample.current_stage ? (
-                            <Badge variant="secondary">{formatStageDisplay(sample.current_stage)}</Badge>
+                            (() => {
+                              const isCompleted = simplifyStatus(sample.current_status) === "Completed"
+                              const allFilled = [
+                                sample.style_name,
+                                sample.color,
+                                sample.qty,
+                                sample.season_id,
+                                sample.brand_id,
+                                sample.division,
+                                sample.product_category,
+                                sample.sample_type,
+                                sample.coo,
+                              ].every((v) => v !== undefined && v !== null && String(v).trim() !== "")
+
+                              const displayStage = isCompleted && allFilled
+                                ? "Delivered"
+                                : formatStageDisplay(sample.current_stage)
+
+                              const isDelivered = normalizeStatus(displayStage).includes("delivered")
+
+                              return (
+                                <Badge
+                                  variant="secondary"
+                                  className={isDelivered ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300" : undefined}
+                                >
+                                  {displayStage}
+                                </Badge>
+                              )
+                            })()
                           ) : (
                             "-"
                           )}
@@ -1163,29 +1191,9 @@ export default function SamplesListPage() {
                     </SelectTrigger>
                     <SelectContent>
                       <SelectItem value="none">— Clear —</SelectItem>
-                      {availableStatuses.map((status) => (
+                      {editableStatuses.map((status) => (
                         <SelectItem key={status} value={status}>
                           {status}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-1.5 sm:col-span-2">
-                  <Label className="text-xs">Current stage</Label>
-                  <Select
-                    value={editFormData.current_stage ?? ""}
-                    onValueChange={(v) =>
-                      setEditFormData({ ...editFormData, current_stage: v })
-                    }
-                  >
-                    <SelectTrigger className="h-8 text-sm">
-                      <SelectValue placeholder="Stage" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {STAGE_OPTIONS.map((opt) => (
-                        <SelectItem key={opt.value} value={opt.value}>
-                          {opt.label}
                         </SelectItem>
                       ))}
                     </SelectContent>
@@ -1242,9 +1250,6 @@ export default function SamplesListPage() {
                 return (
                   <>
                     Save your changes without moving to a new stage?
-                    <span className="mt-2 block text-muted-foreground">
-                      (Already at final stage: {currentLabel})
-                    </span>
                   </>
                 )
               })()}

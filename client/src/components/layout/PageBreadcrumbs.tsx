@@ -49,6 +49,8 @@ function getBreadcrumbs(pathname: string, compact: boolean) {
     crumbs.push({ label: "Specific Access", path: pathname })
   } else if (pathname === "/help") {
     crumbs.push({ label: "Help Center", path: "/help" })
+  } else if (pathname === "/activity-logs") {
+    crumbs.push({ label: "Activity Logs", path: "/activity-logs" })
   }
   
   return crumbs

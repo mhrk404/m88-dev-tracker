@@ -258,7 +258,7 @@ export default function AnalyticsTablePage() {
                   <th style="padding:6px 10px;border:1px solid #ddd;text-align:left;">Early</th>
                   <th style="padding:6px 10px;border:1px solid #ddd;text-align:left;">On-Time</th>
                   <th style="padding:6px 10px;border:1px solid #ddd;text-align:left;">Delayed</th>
-                  <th style="padding:6px 10px;border:1px solid #ddd;text-align:left;">Pending</th>
+                  <th style="padding:6px 10px;border:1px solid #ddd;text-align:left;">Processing Samples</th>
                   <th style="padding:6px 10px;border:1px solid #ddd;text-align:left;">Total Deliveries</th>
                   <th style="padding:6px 10px;border:1px solid #ddd;text-align:left;">Total Styles</th>
                   <th style="padding:6px 10px;border:1px solid #ddd;text-align:left;">On-Time %</th>
@@ -367,116 +367,104 @@ export default function AnalyticsTablePage() {
       <Card>
         <CardContent className="pt-6">
           {/* Filters */}
-          <div className="mb-6 border-b pb-6 flex justify-between items-center">
-            <input
-              type="text"
-              value={searchTerm}
-              onChange={(event) => setSearchTerm(event.target.value)}
-              placeholder="Filter tasks..."
-              className="h-9 w-full max-w-xs rounded-md border border-input bg-background px-3 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-            />
-            <div className="flex flex-wrap items-center gap-2">
-              <Select value={brandId} onValueChange={setBrandId}>
-                <SelectTrigger className="h-9 w-[160px]">
-                  <SelectValue placeholder="Brand" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All brands</SelectItem>
-                  {brands.map((b) => (
-                    <SelectItem key={b.id} value={String(b.id)}>
-                      {b.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <Select value={category} onValueChange={setCategory}>
-                <SelectTrigger className="h-9 w-[160px]">
-                  <SelectValue placeholder="Category" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All categories</SelectItem>
-                  {categories.map((item) => (
-                    <SelectItem key={item.id} value={item.name}>
-                      {item.name}
-                    </SelectItem>
-                  ))}
-                  <SelectItem value="Uncategorized">Uncategorized</SelectItem>
-                </SelectContent>
-              </Select>
-              <Select value={seasonId} onValueChange={setSeasonId}>
-                <SelectTrigger className="h-9 w-[160px]">
-                  <SelectValue placeholder="Season" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All seasons</SelectItem>
-                  {seasons.map((season) => (
-                    <SelectItem key={season.id} value={String(season.id)}>
-                      {season.code} {season.year}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <Select value={month} onValueChange={setMonth}>
-                <SelectTrigger className="h-9 w-[140px]">
-                  <SelectValue placeholder="Month" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All months</SelectItem>
-                  {MONTHS.map((m) => (
-                    <SelectItem key={m.value} value={m.value}>
-                      {m.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <Select value={year} onValueChange={setYear}>
-                <SelectTrigger className="h-9 w-[120px]">
-                  <SelectValue placeholder="Year" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All years</SelectItem>
-                  {YEAR_OPTIONS.map((value) => (
-                    <SelectItem key={value} value={value}>
-                      {value}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <Select value={threshold} onValueChange={setThreshold}>
-                <SelectTrigger className="h-9 w-[180px]">
-                  <SelectValue placeholder="Threshold" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All performance</SelectItem>
-                  {THRESHOLD_OPTIONS.map((value) => (
-                    <SelectItem key={value} value={value}>
-                      Below {value}%
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={clearFilters}
-                disabled={loading}
-                className="h-9"
-              >
-                Clear filters
-              </Button>
-              <Button
-                type="button"
-                size="sm"
-                onClick={() => loadData()}
-                disabled={loading}
-                className="h-9"
-              >
-                {loading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
-                Apply
-              </Button>
+          {rowsWithPct.length > 0 && (
+            <div className="mb-6 border-b pb-6 flex justify-between items-center">
+              <input
+                type="text"
+                value={searchTerm}
+                onChange={(event) => setSearchTerm(event.target.value)}
+                placeholder="Filter tasks..."
+                className="h-9 w-full max-w-xs rounded-md border border-input bg-background px-3 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+              />
+              <div className="flex flex-wrap items-center gap-2">
+                <Select value={brandId} onValueChange={setBrandId}>
+                  <SelectTrigger className="h-9 w-[160px]">
+                    <SelectValue placeholder="Brand" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All brands</SelectItem>
+                    {brands.map((b) => (
+                      <SelectItem key={b.id} value={String(b.id)}>
+                        {b.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Select value={seasonId} onValueChange={setSeasonId}>
+                  <SelectTrigger className="h-9 w-[160px]">
+                    <SelectValue placeholder="Season" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All seasons</SelectItem>
+                    {seasons.map((season) => (
+                      <SelectItem key={season.id} value={String(season.id)}>
+                        {season.code} {season.year}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Select value={month} onValueChange={setMonth}>
+                  <SelectTrigger className="h-9 w-[140px]">
+                    <SelectValue placeholder="Month" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All months</SelectItem>
+                    {MONTHS.map((m) => (
+                      <SelectItem key={m.value} value={m.value}>
+                        {m.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Select value={year} onValueChange={setYear}>
+                  <SelectTrigger className="h-9 w-[120px]">
+                    <SelectValue placeholder="Year" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All years</SelectItem>
+                    {YEAR_OPTIONS.map((value) => (
+                      <SelectItem key={value} value={value}>
+                        {value}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Select value={threshold} onValueChange={setThreshold}>
+                  <SelectTrigger className="h-9 w-[180px]">
+                    <SelectValue placeholder="Threshold" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All performance</SelectItem>
+                    {THRESHOLD_OPTIONS.map((value) => (
+                      <SelectItem key={value} value={value}>
+                        Below {value}%
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={clearFilters}
+                  disabled={loading}
+                  className="h-9"
+                >
+                  Clear filters
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={() => loadData()}
+                  disabled={loading}
+                  className="h-9"
+                >
+                  {loading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+                  Apply
+                </Button>
+              </div>
             </div>
-          </div>
+          )}
 
           {/* Table */}
           <div className="overflow-x-auto">
@@ -487,7 +475,7 @@ export default function AnalyticsTablePage() {
                   <th className="h-10 px-2 text-left align-middle font-medium text-muted-foreground">Early</th>
                   <th className="h-10 px-2 text-left align-middle font-medium text-muted-foreground">On-Time</th>
                   <th className="h-10 px-2 text-left align-middle font-medium text-muted-foreground">Delayed</th>
-                  <th className="h-10 px-2 text-left align-middle font-medium text-muted-foreground">Pending</th>
+                  <th className="h-10 px-2 text-left align-middle font-medium text-muted-foreground">Processing Samples</th>
                   <th className="h-10 px-2 text-left align-middle font-medium text-muted-foreground">Total Deliveries</th>
                   <th className="h-10 px-2 text-left align-middle font-medium text-muted-foreground">Total Styles</th>
                   <th className="h-10 px-2 text-left align-middle font-medium text-muted-foreground">On-Time %</th>

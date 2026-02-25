@@ -67,8 +67,9 @@ export default function SampleCreatePage() {
     ref_from_m88: "No",
     ref_sample_to_fty: "No",
     additional_notes: "",
+    sample_status: "Active",
     current_status: "Pending",
-    current_stage: STAGES.SAMPLE_DEVELOPMENT,
+    current_stage: STAGES.PSI,
   })
 
   useEffect(() => {
@@ -143,6 +144,7 @@ export default function SampleCreatePage() {
         unfree_status: formData.unfree_status,
         sample_type: formData.sample_type,
         sample_type_group: formData.sample_type_group,
+        sample_status: formData.sample_status || "Active",
         kickoff_date: formData.kickoff_date || null,
         sample_due_denver: formData.sample_due_denver || null,
         requested_lead_time: formData.requested_lead_time != null ? formData.requested_lead_time : null,
@@ -152,7 +154,7 @@ export default function SampleCreatePage() {
         ref_sample_to_fty: formData.ref_sample_to_fty,
         additional_notes: formData.additional_notes,
         current_status: formData.current_status || "Pending",
-        current_stage: formData.current_stage || STAGES.SAMPLE_DEVELOPMENT,
+        current_stage: formData.current_stage || STAGES.PSI,
         created_by: user.id,
       }
       if ((payload.requested_lead_time == null || payload.requested_lead_time === undefined) && payload.kickoff_date && payload.sample_due_denver) {
@@ -237,12 +239,13 @@ export default function SampleCreatePage() {
           },
           unfree_status: row.unfree_status || "",
           sample_type: row.sample_type || row.sampleType || "",
+          sample_status: (row.sample_status || row.sampleStatus || "Active").trim() || "Active",
           kickoff_date: row.kickoff_date || "",
           sample_due_denver: row.sample_due_denver || "",
           current_status: (row.current_status || row.currentStatus || "Pending").trim() || "Pending",
           current_stage:
-            (row.current_stage || row.currentStage || STAGES.SAMPLE_DEVELOPMENT).trim() ||
-            STAGES.SAMPLE_DEVELOPMENT,
+            (row.current_stage || row.currentStage || STAGES.PSI).trim() ||
+            STAGES.PSI,
           requested_lead_time: (row.requested_lead_time ? Number(row.requested_lead_time) : undefined) ?? computeLeadTime(row.kickoff_date || row.kickoffDate, row.sample_due_denver || row.sampleDueDenver),
           lead_time_type: classifyLeadTime((row.requested_lead_time ? Number(row.requested_lead_time) : undefined) ?? computeLeadTime(row.kickoff_date || row.kickoffDate, row.sample_due_denver || row.sampleDueDenver)),
           created_by: user.id,

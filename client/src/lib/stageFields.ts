@@ -19,8 +19,8 @@ export const STAGE_FIELDS: Record<StageName, StageFieldConfig[]> = {
   [STAGES.PSI]: [
     { key: "tp_handoff_td", label: "Date TP Hand-off to TD", type: "date", optional: true },
     { key: "sent_date", label: "Date PSI Details Sent to Factory", type: "date", optional: true },
-    { key: "p3_remake_reason", label: "P3+ Sample Reason / Remake Reason", type: "textarea", optional: true },
     { key: "is_checked", label: "Mark PSI Stage as Checked / Verified", type: "boolean", optional: true },
+    { key: "p3_remake_reason", label: "P3+ Sample Reason / Remake Reason", type: "textarea", optional: true },
   ],
   [STAGES.SAMPLE_DEVELOPMENT]: [
     // Setup

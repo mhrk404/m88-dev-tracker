@@ -4,7 +4,7 @@ export function getStatusColor(status: string | null | undefined): string {
   const s = (status || "").toUpperCase()
 
   // Negative/blocked statuses - red
-  if (s === "REJECTED" || s === "HOLD" || s === "CANCELLED") {
+  if (s === "REJECTED" || s === "HOLD" || s === "CANCELLED" || s === "CANCELED" || s === "DROPPED") {
     return "bg-rose-500"
   }
 
@@ -37,7 +37,7 @@ export function getStatusBadgeVariant(status: string | null | undefined): "defau
   const s = (status || "").toUpperCase()
 
   // Negative/blocked - destructive
-  if (s === "REJECTED" || s === "HOLD" || s === "CANCELLED") {
+  if (s === "REJECTED" || s === "HOLD" || s === "CANCELLED" || s === "CANCELED" || s === "DROPPED") {
     return "destructive"
   }
 

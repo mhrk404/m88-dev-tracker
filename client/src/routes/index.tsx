@@ -7,6 +7,7 @@ import UsersPage from "@/pages/users/UsersPage"
 import LookupsPage from "@/pages/lookups/LookupsPage"
 import RoleAccessPage from "@/pages/admin/RoleAccessPage"
 import RoleAccessDetailPage from "@/pages/admin/RoleAccessDetailPage"
+import ActivityLogsPage from "@/pages/admin/ActivityLogsPage"
 import SamplesListPage from "@/pages/samples/SamplesListPage"
 import SampleDetailPage from "@/pages/samples/SampleDetailPage"
 import SampleCreatePage from "@/pages/samples/SampleCreatePage"
@@ -14,6 +15,12 @@ import SampleEditPage from "@/pages/samples/SampleEditPage"
 import SampleStageEditPage from "@/pages/samples/SampleStageEditPage"
 import AnalyticsPage from "@/pages/analytics/AnalyticsPage"
 import AnalyticsTablePage from "@/pages/analytics/AnalyticsTablePage"
+import PBDMonitoringPage from "@/pages/pbd/PBDMonitoringPage"
+import CostingMonitoringPage from "@/pages/costing/CostingMonitoringPage"
+import TDMonitoringPage from "@/pages/td/TDMonitoringPage"
+import FTYMonitoringPage from "@/pages/fty/FTYMonitoringPage"
+import MDMonitoringPage from "@/pages/md/MDMonitoringPage"
+import BrandMonitoringPage from "@/pages/brand/BrandMonitoringPage"
 import HelpPage from "@/pages/help/HelpPage"
 import NotFoundPage from "@/pages/not-found/NotFoundPage"
 
@@ -45,6 +52,30 @@ export const router = createBrowserRouter([
       {
         path: "analytics/table",
         element: <AnalyticsTablePage />,
+      },
+      {
+        path: "pbd/monitoring",
+        element: <PBDMonitoringPage />,
+      },
+      {
+        path: "costing/monitoring",
+        element: <CostingMonitoringPage />,
+      },
+      {
+        path: "td/monitoring",
+        element: <TDMonitoringPage />,
+      },
+      {
+        path: "fty/monitoring",
+        element: <FTYMonitoringPage />,
+      },
+      {
+        path: "md/monitoring",
+        element: <MDMonitoringPage />,
+      },
+      {
+        path: "brand/monitoring",
+        element: <BrandMonitoringPage />,
       },
       {
         path: "samples",
@@ -81,6 +112,10 @@ export const router = createBrowserRouter([
       {
         path: "role-access/:id",
         element: <RoleAccessDetailPage />,
+      },
+      {
+        path: "activity-logs",
+        element: <ActivityLogsPage />,
       },
       {
         path: "help",

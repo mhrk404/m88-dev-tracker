@@ -1,6 +1,7 @@
 import { supabase } from '../config/supabase.js';
 import { logAudit, auditMeta } from '../services/auditService.js';
 import { STAGE_TABLES, getStagesForRole } from '../middleware/rbac.js';
+import { SAMPLE_ROLE_KEYS, setSampleRoleOwner } from '../services/sampleRoleOwnersService.js';
 
 const STAGE_FLOW = [...STAGE_TABLES, 'delivered_confirmation'];
 
@@ -8,6 +9,68 @@ function getNextStage(currentStage) {
   const idx = STAGE_FLOW.indexOf(currentStage);
   if (idx === -1 || idx >= STAGE_FLOW.length - 1) return null;
   return STAGE_FLOW[idx + 1] ?? null;
+}
+
+function isCanceledLike(value) {
+  if (value == null) return false;
+  const normalized = String(value).trim().toLowerCase();
+  return normalized === 'cancel' || normalized === 'canceled' || normalized === 'cancelled' || normalized === 'dropped';
+}
+
+function isAdminRole(roleCode) {
+  const role = String(roleCode || '').trim().toUpperCase();
+  return role === 'ADMIN' || role === 'SUPER_ADMIN';
+}
+
+async function getSampleAssignment(sampleId) {
+  const { data, error } = await supabase
+    .from('team_assignment')
+    .select('pbd_user_id, td_user_id, fty_user_id, fty_md2_user_id, md_user_id, costing_user_id')
+    .eq('sample_id', sampleId)
+    .maybeSingle();
+  if (error) throw error;
+  return data;
+}
+
+function resolveRoleOwnerForStage(stage, payload, user, assignment) {
+  const roleCode = String(user?.roleCode || '').toUpperCase();
+
+  if (stage === 'psi') {
+    return {
+      roleKey: SAMPLE_ROLE_KEYS.TD_PSI_INTAKE,
+      userId: roleCode === 'TD' ? user?.id : (assignment?.td_user_id ?? null),
+    };
+  }
+
+  if (stage === 'sample_development') {
+    return {
+      roleKey: SAMPLE_ROLE_KEYS.FTY_MD_DEVELOPMENT,
+      userId: payload?.fty_md_user_id ?? (roleCode === 'FTY' ? user?.id : (assignment?.fty_md2_user_id ?? assignment?.fty_user_id ?? null)),
+    };
+  }
+
+  if (stage === 'pc_review') {
+    return {
+      roleKey: SAMPLE_ROLE_KEYS.MD_M88_DECISION,
+      userId: roleCode === 'MD' ? user?.id : (assignment?.md_user_id ?? null),
+    };
+  }
+
+  if (stage === 'costing') {
+    return {
+      roleKey: SAMPLE_ROLE_KEYS.COSTING_TEAM_COST_SHEET,
+      userId: payload?.team_member_user_id ?? (roleCode === 'COSTING' ? user?.id : (assignment?.costing_user_id ?? null)),
+    };
+  }
+
+  if (stage === 'shipment_to_brand') {
+    return {
+      roleKey: SAMPLE_ROLE_KEYS.PBD_BRAND_TRACKING,
+      userId: roleCode === 'PBD' ? user?.id : (assignment?.pbd_user_id ?? null),
+    };
+  }
+
+  return null;
 }
 
 /** Ensure sample exists; return 404 if not. Stages are always scoped to a sample. */
@@ -91,6 +154,17 @@ export const updateStage = async (req, res) => {
       console.log('[DEBUG] Inserted record:', JSON.stringify(inserted, null, 2));
     }
 
+    const assignment = isAdminRole(req.user?.roleCode) ? await getSampleAssignment(sampleId) : null;
+    const roleOwner = resolveRoleOwnerForStage(stage, payload, req.user, assignment);
+    if (roleOwner?.roleKey) {
+      await setSampleRoleOwner({
+        sampleId,
+        roleKey: roleOwner.roleKey,
+        userId: roleOwner.userId,
+        enteredBy: req.user?.id ?? null,
+      });
+    }
+
     if (advance_to_stage) {
       const requestedNext = String(advance_to_stage).trim().toLowerCase();
       const expectedNext = getNextStage(stage);
@@ -105,13 +179,29 @@ export const updateStage = async (req, res) => {
       if (stageErr) throw stageErr;
     }
 
-    // Update sample_request current_status to PROCESSING when a stage is touched
+    const canceledInPayload = isCanceledLike(payload.stage_status)
+      || isCanceledLike(payload.current_status)
+      || isCanceledLike(payload.sample_status)
+      || isCanceledLike(payload.status)
+      || isCanceledLike(payload.sent_status)
+      || isCanceledLike(payload.awb_status);
+
+    let mappedCurrentStatus = 'Processing';
+    let mappedSampleStatus = 'Processing';
+    if (canceledInPayload) {
+      mappedCurrentStatus = 'Dropped';
+      mappedSampleStatus = 'Dropped';
+    } else if (stage === 'shipment_to_brand' || stage === 'delivered_confirmation') {
+      mappedCurrentStatus = 'Delivered';
+      mappedSampleStatus = 'Completed';
+    }
+
+    // Apply stage/sample mapping whenever a stage is touched
     const { error: statusErr } = await supabase
       .from('sample_request')
-      .update({ current_status: 'PROCESSING' })
-      .eq('sample_id', sampleId)
-      .eq('current_status', 'PENDING'); // Only update if still PENDING
-    if (statusErr) console.error('Failed to update sample status to PROCESSING:', statusErr);
+      .update({ current_status: mappedCurrentStatus, sample_status: mappedSampleStatus })
+      .eq('sample_id', sampleId);
+    if (statusErr) console.error('Failed to apply sample/stage status mapping:', statusErr);
 
     try {
       await supabase.from('stage_audit_log').insert({

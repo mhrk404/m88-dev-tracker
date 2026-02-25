@@ -38,7 +38,7 @@ import {
 } from "@/components/ui/breadcrumb"
 import { FormSkeleton } from "@/components/ui/skeletons"
 import { STAGES } from "@/lib/constants"
-import { canEditSample, stageForRole } from "@/lib/rbac"
+import { stageForRole } from "@/lib/rbac"
 import { getStageFields, stagePayloadFromForm, type StageFieldConfig } from "@/lib/stageFields"
 import { getSample, updateSample } from "@/api/samples"
 import { listUsers } from "@/api/users"
@@ -66,6 +66,7 @@ const STAGE_OPTIONS: StageName[] = [
   STAGES.PC_REVIEW,
   STAGES.COSTING,
   STAGES.SHIPMENT_TO_BRAND,
+  STAGES.DELIVERED_CONFIRMATION,
 ]
 
 const STAGE_ORDER: StageName[] = [
@@ -101,6 +102,47 @@ function getNextStage(currentStage: StageName | null | undefined): StageName | n
   return STAGE_ORDER[idx + 1] ?? null
 }
 
+function isDeliveryConfirmationStage(stage: string | null | undefined): boolean {
+  return String(stage || "").trim().toLowerCase() === STAGES.DELIVERED_CONFIRMATION
+}
+
+type StageRoleConfig = {
+  label: string
+  roleCode: "PBD" | "TD" | "FTY" | "MD" | "COSTING"
+  assignmentKey?: "pbd_user_id" | "td_user_id" | "fty_user_id" | "fty_md2_user_id" | "md_user_id" | "costing_user_id"
+  stageFieldKey?: "fty_md_user_id" | "team_member_user_id"
+}
+
+function getStageRoleConfig(stage: StageName | null | undefined): StageRoleConfig | null {
+  if (!stage) return null
+  if (stage === STAGES.PSI) {
+    return { label: "TD - PSI Intake", roleCode: "TD", assignmentKey: "td_user_id" }
+  }
+  if (stage === STAGES.SAMPLE_DEVELOPMENT) {
+    return {
+      label: "FTY MD - FTY Development",
+      roleCode: "FTY",
+      assignmentKey: "fty_md2_user_id",
+      stageFieldKey: "fty_md_user_id",
+    }
+  }
+  if (stage === STAGES.PC_REVIEW) {
+    return { label: "MD M88 - MD/Product Decision", roleCode: "MD", assignmentKey: "md_user_id" }
+  }
+  if (stage === STAGES.COSTING) {
+    return {
+      label: "Costing Team - Cost Sheet",
+      roleCode: "COSTING",
+      assignmentKey: "costing_user_id",
+      stageFieldKey: "team_member_user_id",
+    }
+  }
+  if (stage === STAGES.SHIPMENT_TO_BRAND) {
+    return { label: "Brand Tracking/Delivery Confirmation - PBD", roleCode: "PBD", assignmentKey: "pbd_user_id" }
+  }
+  return null
+}
+
 function valueToString(v: unknown): string {
   if (v == null) return ""
   if (typeof v === "boolean") return v ? "true" : "false"
@@ -118,6 +160,23 @@ function fieldValueToForm(value: unknown, type: StageFieldConfig["type"]): strin
 type FormValidationState = {
   fieldErrors: Record<string, string>
   canSubmit: boolean
+  hasStageFieldChanges: boolean
+}
+
+function userMatchesRole(user: User, expectedRole: "PBD" | "TD" | "FTY" | "MD" | "COSTING"): boolean {
+  const roleCode = String(user.roleCode || "").trim().toUpperCase()
+  const roleName = String(user.roleName || "").trim().toUpperCase()
+
+  const roleAliases: Record<"PBD" | "TD" | "FTY" | "MD" | "COSTING", string[]> = {
+    PBD: ["PBD", "PRODUCT BUSINESS DEV", "PRODUCT BUSINESS DEVELOPMENT"],
+    TD: ["TD", "TECHNICAL DESIGN"],
+    FTY: ["FTY", "FACTORY", "FACTORY EXECUTION"],
+    MD: ["MD", "MERCHANDISING"],
+    COSTING: ["COSTING", "COSTING ANALYSIS"],
+  }
+
+  const aliases = roleAliases[expectedRole]
+  return aliases.includes(roleCode) || aliases.includes(roleName)
 }
 
 export default function SampleStageEditPage() {
@@ -135,15 +194,23 @@ export default function SampleStageEditPage() {
 
   const userStage = user ? stageForRole(user.roleCode as RoleCode) : null
   const isAdmin = user?.roleCode === "ADMIN" || user?.roleCode === "SUPER_ADMIN"
-  const canUpdateSampleRecord = user ? canEditSample(user.roleCode as RoleCode) : false
+  const canSeeAllRegions = user?.roleCode === "SUPER_ADMIN"
+  const currentRegion = user?.region
   const defaultStage: StageName | null = userStage ?? (isAdmin ? STAGES.PSI : null)
 
   const [selectedStage, setSelectedStage] = useState<StageName | null>(defaultStage)
   const [formValues, setFormValues] = useState<Record<string, string>>({})
   const [initialFormValues, setInitialFormValues] = useState<Record<string, string>>({})
   const [expandedSections, setExpandedSections] = useState<Record<string, boolean>>({})
+  const [stageRoleUserId, setStageRoleUserId] = useState<string>("")
 
   const currentStage = selectedStage ?? userStage
+  const stageRoleConfig = getStageRoleConfig(currentStage)
+
+  function getSingleRelation<T>(value: T | T[] | null | undefined): T | null {
+    if (!value) return null
+    return Array.isArray(value) ? value[0] ?? null : value
+  }
 
   const loadData = useCallback(async () => {
     if (!id) return
@@ -175,6 +242,13 @@ export default function SampleStageEditPage() {
   }, [loadData])
 
   useEffect(() => {
+    if (!sample?.current_stage) return
+    if (isDeliveryConfirmationStage(sample.current_stage)) {
+      setSelectedStage(STAGES.DELIVERED_CONFIRMATION)
+    }
+  }, [sample?.current_stage])
+
+  useEffect(() => {
     if (!isAdmin) return
     let active = true
     async function loadUsers() {
@@ -200,6 +274,23 @@ export default function SampleStageEditPage() {
     for (const f of fields) {
       initial[f.key] = fieldValueToForm(row?.[f.key], f.type)
     }
+
+    const roleConfig = getStageRoleConfig(currentStage)
+    const assignment = getSingleRelation(sample?.team_assignment)
+    const assignmentValue = roleConfig?.assignmentKey ? assignment?.[roleConfig.assignmentKey] : null
+
+    if (roleConfig?.stageFieldKey) {
+      const currentStageValue = String(initial[roleConfig.stageFieldKey] ?? "").trim()
+      if (!currentStageValue && assignmentValue != null && String(assignmentValue).trim() !== "") {
+        initial[roleConfig.stageFieldKey] = String(assignmentValue)
+      }
+    } else if (roleConfig?.assignmentKey) {
+      const currentAssignmentValue = String(initial[roleConfig.assignmentKey] ?? "").trim()
+      if (!currentAssignmentValue && assignmentValue != null && String(assignmentValue).trim() !== "") {
+        initial[roleConfig.assignmentKey] = String(assignmentValue)
+      }
+    }
+
     setFormValues(initial)
     setInitialFormValues(initial)
     
@@ -229,7 +320,35 @@ export default function SampleStageEditPage() {
       initialExpanded[name] = name === firstIncomplete
     })
     setExpandedSections(initialExpanded)
-  }, [currentStage, stagesData])
+  }, [currentStage, stagesData, sample])
+
+  useEffect(() => {
+    if (!stageRoleConfig || !sample) {
+      setStageRoleUserId("")
+      return
+    }
+
+    const assignment = getSingleRelation(sample.team_assignment)
+    const assignmentValue = stageRoleConfig.assignmentKey ? assignment?.[stageRoleConfig.assignmentKey] : null
+    const stageValue = stageRoleConfig.stageFieldKey ? formValues[stageRoleConfig.stageFieldKey] : ""
+
+    if (stageValue && String(stageValue).trim() !== "") {
+      setStageRoleUserId(String(stageValue))
+      return
+    }
+
+    if (assignmentValue != null && String(assignmentValue).trim() !== "") {
+      setStageRoleUserId(String(assignmentValue))
+      return
+    }
+
+    if (!isAdmin && user?.id != null) {
+      setStageRoleUserId(String(user.id))
+      return
+    }
+
+    setStageRoleUserId("")
+  }, [stageRoleConfig, sample, formValues, isAdmin, user?.id])
 
   useEffect(() => {
     if (!currentStage || isAdmin || !user) return
@@ -269,6 +388,7 @@ export default function SampleStageEditPage() {
       return {
         fieldErrors: {},
         canSubmit: false,
+        hasStageFieldChanges: false,
       }
     }
 
@@ -314,25 +434,83 @@ export default function SampleStageEditPage() {
       }
     }
 
-    const isDirty = fields.some((f) => (formValues[f.key] ?? "") !== (initialFormValues[f.key] ?? ""))
+    // Fix: compare boolean values as strings for hasStageFieldChanges
+    const hasStageFieldChanges = fields.some((f) => {
+      const current = f.type === "boolean"
+        ? String(formValues[f.key] ?? "")
+        : (formValues[f.key] ?? "")
+      const initial = f.type === "boolean"
+        ? String(initialFormValues[f.key] ?? "")
+        : (initialFormValues[f.key] ?? "")
+      return current !== initial
+    })
 
     return {
       fieldErrors: errs,
-      canSubmit: isDirty && Object.keys(errs).length === 0,
+      canSubmit: hasStageFieldChanges && Object.keys(errs).length === 0,
+      hasStageFieldChanges,
     }
   }, [currentStage, formValues, initialFormValues])
 
+  const initialStageRoleUserId = useMemo(() => {
+    if (!stageRoleConfig || !sample) return ""
+
+    const assignment = getSingleRelation(sample.team_assignment)
+    const assignmentValue = stageRoleConfig.assignmentKey ? assignment?.[stageRoleConfig.assignmentKey] : null
+    const stageValue = stageRoleConfig.stageFieldKey ? initialFormValues[stageRoleConfig.stageFieldKey] : ""
+
+    if (stageValue && String(stageValue).trim() !== "") return String(stageValue)
+    if (assignmentValue != null && String(assignmentValue).trim() !== "") return String(assignmentValue)
+    if (!isAdmin && user?.id != null) return String(user.id)
+    return ""
+  }, [stageRoleConfig, sample, initialFormValues, isAdmin, user?.id])
+
+  const hasRoleChange = useMemo(() => {
+    const currentValue = (stageRoleUserId || "").trim()
+    const initialValue = (initialStageRoleUserId || "").trim()
+    return currentValue !== initialValue
+  }, [stageRoleUserId, initialStageRoleUserId])
+
+  const canSave = validationState.canSubmit || (!validationState.hasStageFieldChanges && hasRoleChange)
+
+  function withSelectedUser(usersList: User[], selectedUserId: string | undefined): User[] {
+    if (!selectedUserId) return usersList
+    const selectedIdNum = Number(selectedUserId)
+    if (Number.isNaN(selectedIdNum)) return usersList
+    if (usersList.some((u) => u.id === selectedIdNum)) return usersList
+
+    const selectedUser = users.find((u) => u.id === selectedIdNum)
+    if (!selectedUser) return usersList
+
+    return [...usersList, selectedUser].sort((a, b) =>
+      (a.full_name || a.username).localeCompare(b.full_name || b.username)
+    )
+  }
+
   const ftyUsers = useMemo(() => {
-    return users
-      .filter((u) => (u.roleCode || "").toUpperCase() === "FTY" && u.is_active)
+    const filteredUsers = users
+      .filter((u) => userMatchesRole(u, "FTY") && u.is_active)
+      .filter((u) => canSeeAllRegions || !currentRegion || u.region === currentRegion)
       .sort((a, b) => (a.full_name || a.username).localeCompare(b.full_name || b.username))
-  }, [users])
+    return withSelectedUser(filteredUsers, formValues.fty_md_user_id)
+  }, [users, canSeeAllRegions, currentRegion, formValues.fty_md_user_id])
 
   const costingUsers = useMemo(() => {
-    return users
-      .filter((u) => (u.roleCode || "").toUpperCase() === "COSTING" && u.is_active)
+    const filteredUsers = users
+      .filter((u) => userMatchesRole(u, "COSTING") && u.is_active)
+      .filter((u) => canSeeAllRegions || !currentRegion || u.region === currentRegion)
       .sort((a, b) => (a.full_name || a.username).localeCompare(b.full_name || b.username))
-  }, [users])
+    return withSelectedUser(filteredUsers, formValues.team_member_user_id)
+  }, [users, canSeeAllRegions, currentRegion, formValues.team_member_user_id])
+
+  const stageRoleUsers = useMemo(() => {
+    if (!stageRoleConfig) return []
+    const filteredUsers = users
+      .filter((u) => userMatchesRole(u, stageRoleConfig.roleCode) && u.is_active)
+      .filter((u) => canSeeAllRegions || !currentRegion || u.region === currentRegion)
+      .sort((a, b) => (a.full_name || a.username).localeCompare(b.full_name || b.username))
+    return withSelectedUser(filteredUsers, stageRoleUserId)
+  }, [users, stageRoleConfig, canSeeAllRegions, currentRegion, stageRoleUserId])
 
   const userNameById = useMemo(() => {
     const map = new Map<number, string>()
@@ -353,6 +531,10 @@ export default function SampleStageEditPage() {
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     if (!id || !currentStage) return
+    if (String(sample?.current_status || "").trim().toLowerCase().includes("drop")) {
+      toast.error("Sample is dropped. Activate the sample first to make stage modifications.")
+      return
+    }
     const ok = validateForm()
     if (ok) setShowConfirm(true)
   }
@@ -361,13 +543,14 @@ export default function SampleStageEditPage() {
     const { fieldErrors: errs, canSubmit } = validationState
 
     setFieldErrors(errs)
-    if (Object.keys(errs).length > 0) {
+    if (validationState.hasStageFieldChanges && Object.keys(errs).length > 0) {
       const first = Object.values(errs)[0]
       toast.error(first)
       return false
     }
 
-    return canSubmit
+    if (validationState.hasStageFieldChanges) return canSubmit
+    return hasRoleChange
   }
 
   function canAdvanceStage(): boolean {
@@ -408,6 +591,10 @@ export default function SampleStageEditPage() {
 
   function confirmAndSave(moveToNext: boolean) {
     if (!id || !currentStage) return
+    if (String(sample?.current_status || "").trim().toLowerCase().includes("drop")) {
+      toast.error("Sample is dropped. Activate the sample first to make stage modifications.")
+      return
+    }
 
     // Validate Finalize section if trying to advance
     if (moveToNext && !canAdvanceStage()) {
@@ -419,6 +606,7 @@ export default function SampleStageEditPage() {
     const sampleId = id
     const stage = currentStage
     const payload = stagePayloadFromForm(stage, formValues as unknown as Record<string, unknown>)
+    const shouldSaveStage = moveToNext || validationState.hasStageFieldChanges
     const stageLabel = STAGE_LABELS[stage] ?? stage
     const nextStage = getNextStage(stage)
 
@@ -466,31 +654,27 @@ export default function SampleStageEditPage() {
       toast.dismiss(toastId)
       setSaving(true)
       try {
-        console.log('[DEBUG] Saving stage:', stage)
-        console.log('[DEBUG] Form values:', formValues)
-        console.log('[DEBUG] Payload to send:', payload)
-        const stagePayload: Record<string, unknown> = { ...payload }
-        if (moveToNext && nextStage) {
-          stagePayload.advance_to_stage = nextStage
+        if (stageRoleConfig && stageRoleConfig.assignmentKey && isAdmin && hasRoleChange) {
+          await updateSample(sampleId, {
+            assignment: {
+              [stageRoleConfig.assignmentKey]: stageRoleUserId ? Number(stageRoleUserId) : null,
+            },
+          })
         }
-        await updateStage(sampleId, stage, stagePayload)
 
-        const sampleUpdatePayload: Record<string, unknown> = {}
-        if (stage === STAGES.PC_REVIEW) {
-          const reviewStatus = valueToString(payload["review_comp"]).trim()
-          const internalStatus = valueToString(payload["md_int_review"]).trim()
-          const resolvedStatus = reviewStatus || internalStatus
-          if (resolvedStatus) {
-            sampleUpdatePayload.current_status = resolvedStatus.toUpperCase()
+        if (shouldSaveStage) {
+          const stagePayload: Record<string, unknown> = { ...payload }
+          if (stageRoleConfig?.stageFieldKey && stageRoleUserId) {
+            stagePayload[stageRoleConfig.stageFieldKey] = Number(stageRoleUserId)
           }
+          if (moveToNext && nextStage) {
+            stagePayload.advance_to_stage = nextStage
+          }
+          await updateStage(sampleId, stage, stagePayload)
         }
 
         if (moveToNext && nextStage) {
           // current_stage is advanced via updateStage() on backend
-        }
-
-        if (canUpdateSampleRecord && Object.keys(sampleUpdatePayload).length > 0) {
-          await updateSample(sampleId, sampleUpdatePayload)
         }
 
         if (moveToNext && nextStage) {
@@ -510,6 +694,41 @@ export default function SampleStageEditPage() {
         setSaving(false)
       }
     }, DELAY * 1000)
+  }
+
+  async function markSampleReceivedAndComplete() {
+    if (!id) return
+    if (String(sample?.current_status || "").trim().toLowerCase().includes("drop")) {
+      toast.error("Sample is dropped. Activate the sample first to make stage modifications.")
+      return
+    }
+    setSaving(true)
+    setError(null)
+    try {
+      await updateStage(id, STAGES.SHIPMENT_TO_BRAND, {
+        advance_to_stage: STAGES.DELIVERED_CONFIRMATION,
+        stage_status: "Delivered",
+        sent_status: "Sample Received",
+      })
+
+      await updateSample(id, {
+        current_stage: STAGES.DELIVERED_CONFIRMATION,
+        current_status: "Delivered",
+        sample_status: "Completed",
+      })
+
+      await loadData()
+      toast.success("Sample marked as received and completed")
+    } catch (err: unknown) {
+      const message =
+        err && typeof err === "object" && "response" in err
+          ? (err as { response?: { data?: { error?: string } } }).response?.data?.error
+          : "Failed to complete delivery confirmation"
+      setError(message ?? "Failed to complete delivery confirmation")
+      toast.error(message ?? "Failed to complete delivery confirmation")
+    } finally {
+      setSaving(false)
+    }
   }
 
   if (!user) {
@@ -550,12 +769,30 @@ export default function SampleStageEditPage() {
     )
   }
 
-  const fields = currentStage ? getStageFields(currentStage) : []
+  let fields = currentStage ? getStageFields(currentStage) : []
+  // For PSI, if assignmentKey is present but not in fields, add it as a user_select field
+  if (
+    currentStage === STAGES.PSI &&
+    stageRoleConfig?.assignmentKey &&
+    !fields.some(f => f.key === stageRoleConfig.assignmentKey)
+  ) {
+    fields = [
+      {
+        key: stageRoleConfig.assignmentKey,
+        label: stageRoleConfig.label,
+        type: "user_select",
+        optional: false,
+      },
+      ...fields,
+    ]
+  }
+  const isDeliveryCompletionView = isDeliveryConfirmationStage(currentStage)
+  const isSampleDropped = String(sample.current_status || "").trim().toLowerCase().includes("drop")
 
   // Determine context card styling based on status
   const getStatusCardStyle = () => {
     const status = sample?.current_status?.toUpperCase() || ""
-    if (status === "REJECTED" || status === "HOLD" || status === "CANCELLED") {
+    if (status === "REJECTED" || status === "HOLD" || status === "CANCELLED" || status === "CANCELED" || status === "DROPPED") {
       return "border-l-rose-500 bg-rose-50/30 dark:bg-rose-950/10"
     }
     if (
@@ -571,7 +808,7 @@ export default function SampleStageEditPage() {
     if (status.includes("PENDING") || status.includes("REVIEW")) {
       return "border-l-amber-500 bg-amber-50/30 dark:bg-amber-950/10"
     }
-    if (status === "INITIATED" || status.includes("DEVELOPMENT") || status.includes("PROGRESS")) {
+    if (status === "INITIATED" || status.includes("DEVELOPMENT") || status.includes("PROGRESS") || status.includes("ACTIVE")) {
       return "border-l-blue-500 bg-blue-50/30 dark:bg-blue-950/10"
     }
     return "border-l-amber-500 bg-amber-50/30 dark:bg-amber-950/10" // fallback
@@ -679,12 +916,28 @@ export default function SampleStageEditPage() {
               <CardTitle className="text-sm">{STAGE_LABELS[currentStage]}</CardTitle>
             </CardHeader>
             <CardContent className="space-y-3">
-              {error && (
+              {isSampleDropped ? (
                 <div className="rounded-md border border-destructive/50 bg-destructive/10 px-3 py-2 text-xs text-destructive">
-                  {error}
+                  Sample is dropped. Activate the sample first to make stage modifications.
                 </div>
-              )}
-              {(() => {
+              ) : (
+                <>
+                  {/* Removed separate stageRoleConfig block; field will be rendered inline below */}
+
+                  {isDeliveryCompletionView && (
+                    <div className="rounded-md border border-border bg-muted/40 px-3 py-3 text-sm">
+                      <div className="font-medium">Delivery Confirmation</div>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        Mark the sample as received to finalize this request. This sets stage to Delivered and sample status to Completed.
+                      </p>
+                    </div>
+                  )}
+                  {error && (
+                    <div className="rounded-md border border-destructive/50 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+                      {error}
+                    </div>
+                  )}
+                  {(() => {
                 // Group fields by section
                 const sections: Record<string, typeof fields> = {}
                 fields.forEach((f) => {
@@ -709,81 +962,97 @@ export default function SampleStageEditPage() {
                   if (sectionName === "default") {
                     return (
                       <div key={sectionName} className="grid gap-3 sm:grid-cols-2">
-                        {sectionFields.map((f) => (
-                          <div key={f.key} className="space-y-1.5">
-                            <Label htmlFor={f.key} className="text-xs font-medium">
-                              {f.label}
-                              {!f.optional && <span className="text-destructive ml-1">*</span>}
-                            </Label>
-                            {f.type === "text" && (
-                              <Input
-                                id={f.key}
-                                value={formValues[f.key] ?? ""}
-                                onChange={(e) => setFormValues((prev) => ({ ...prev, [f.key]: e.target.value }))}
-                                className="h-8 text-sm"
-                              />
-                            )}
-                            {f.type === "textarea" && (
-                              <textarea
-                                id={f.key}
-                                value={formValues[f.key] ?? ""}
-                                onChange={(e) => setFormValues((prev) => ({ ...prev, [f.key]: e.target.value }))}
-                                className="min-h-[84px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
-                              />
-                            )}
-                            {f.type === "date" && (
-                              <Input
-                                id={f.key}
-                                type="date"
-                                value={valueToString(formValues[f.key]).slice(0, 10)}
-                                onChange={(e) => setFormValues((prev) => ({ ...prev, [f.key]: e.target.value }))}
-                                className="h-8"
-                              />
-                            )}
-                            {f.type === "number" && (
-                              <Input
-                                id={f.key}
-                                type="number"
-                                value={formValues[f.key] ?? ""}
-                                onChange={(e) => setFormValues((prev) => ({ ...prev, [f.key]: e.target.value }))}
-                                className="h-8 text-sm"
-                              />
-                            )}
-                            {f.type === "boolean" && (
-                              <Select
-                                value={formValues[f.key] || "none"}
-                                onValueChange={(v) => setFormValues((prev) => ({ ...prev, [f.key]: v === "none" ? "" : v }))}
-                              >
-                                <SelectTrigger id={f.key} className="h-8">
-                                  <SelectValue placeholder="Select" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="none">—</SelectItem>
-                                  <SelectItem value="true">Yes</SelectItem>
-                                  <SelectItem value="false">No</SelectItem>
-                                </SelectContent>
-                              </Select>
-                            )}
-                            {f.type === "select" && (
-                              <Select
-                                value={formValues[f.key] || "none"}
-                                onValueChange={(v) => setFormValues((prev) => ({ ...prev, [f.key]: v === "none" ? "" : v }))}
-                              >
-                                <SelectTrigger id={f.key} className="h-8">
-                                  <SelectValue placeholder="Select" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="none">—</SelectItem>
-                                  {(f.options ?? []).map((option) => (
-                                    <SelectItem key={option} value={option}>
-                                      {option}
-                                    </SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
-                            )}
-                            {f.type === "user_select" && (
-                              isAdmin ? (
+                        {sectionFields.map((f) => {
+                          // Inline special handling for stageRoleConfig assignment field
+                          if (
+                            stageRoleConfig &&
+                            ((stageRoleConfig.stageFieldKey && f.key === stageRoleConfig.stageFieldKey) ||
+                              (!stageRoleConfig.stageFieldKey && f.key === stageRoleConfig.assignmentKey))
+                          ) {
+                            return (
+                              <div key={f.key} className="space-y-1.5">
+                                <Label htmlFor={f.key} className="text-xs font-medium">
+                                  {stageRoleConfig.label}
+                                  {!f.optional && <span className="text-destructive ml-1">*</span>}
+                                </Label>
+                                {isAdmin ? (
+                                  <Select
+                                    value={formValues[f.key] || "none"}
+                                    onValueChange={(v) => {
+                                      const next = v === "none" ? "" : v
+                                      setFormValues((prev) => ({ ...prev, [f.key]: next }))
+                                      setStageRoleUserId(next)
+                                    }}
+                                  >
+                                    <SelectTrigger id={f.key} className="h-8">
+                                      <SelectValue placeholder="Select" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      <SelectItem value="none">—</SelectItem>
+                                      {stageRoleUsers.map((u) => (
+                                        <SelectItem key={u.id} value={String(u.id)}>
+                                          {u.full_name?.trim() || u.username}
+                                        </SelectItem>
+                                      ))}
+                                    </SelectContent>
+                                  </Select>
+                                ) : (
+                                  <Input
+                                    id={f.key}
+                                    value={getUserLabel(formValues[f.key]) || user?.full_name || user?.username || ""}
+                                    readOnly
+                                    disabled
+                                    className="h-8 text-sm"
+                                  />
+                                )}
+                                {fieldErrors[f.key] && (
+                                  <p className="text-destructive text-xs">{fieldErrors[f.key]}</p>
+                                )}
+                              </div>
+                            )
+                          }
+                          // Default rendering for other fields
+                          return (
+                            <div key={f.key} className="space-y-1.5">
+                              <Label htmlFor={f.key} className="text-xs font-medium">
+                                {f.label}
+                                {!f.optional && <span className="text-destructive ml-1">*</span>}
+                              </Label>
+                              {f.type === "text" && (
+                                <Input
+                                  id={f.key}
+                                  value={formValues[f.key] ?? ""}
+                                  onChange={(e) => setFormValues((prev) => ({ ...prev, [f.key]: e.target.value }))}
+                                  className="h-8 text-sm"
+                                />
+                              )}
+                              {f.type === "textarea" && (
+                                <textarea
+                                  id={f.key}
+                                  value={formValues[f.key] ?? ""}
+                                  onChange={(e) => setFormValues((prev) => ({ ...prev, [f.key]: e.target.value }))}
+                                  className="min-h-[84px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                                />
+                              )}
+                              {f.type === "date" && (
+                                <Input
+                                  id={f.key}
+                                  type="date"
+                                  value={valueToString(formValues[f.key]).slice(0, 10)}
+                                  onChange={(e) => setFormValues((prev) => ({ ...prev, [f.key]: e.target.value }))}
+                                  className="h-8"
+                                />
+                              )}
+                              {f.type === "number" && (
+                                <Input
+                                  id={f.key}
+                                  type="number"
+                                  value={formValues[f.key] ?? ""}
+                                  onChange={(e) => setFormValues((prev) => ({ ...prev, [f.key]: e.target.value }))}
+                                  className="h-8 text-sm"
+                                />
+                              )}
+                              {f.type === "boolean" && (
                                 <Select
                                   value={formValues[f.key] || "none"}
                                   onValueChange={(v) => setFormValues((prev) => ({ ...prev, [f.key]: v === "none" ? "" : v }))}
@@ -793,28 +1062,63 @@ export default function SampleStageEditPage() {
                                   </SelectTrigger>
                                   <SelectContent>
                                     <SelectItem value="none">—</SelectItem>
-                                    {(f.key === "fty_md_user_id" ? ftyUsers : costingUsers).map((u) => (
-                                      <SelectItem key={u.id} value={String(u.id)}>
-                                        {u.full_name?.trim() || u.username}
+                                    <SelectItem value="true">Yes</SelectItem>
+                                    <SelectItem value="false">No</SelectItem>
+                                  </SelectContent>
+                                </Select>
+                              )}
+                              {f.type === "select" && (
+                                <Select
+                                  value={formValues[f.key] || "none"}
+                                  onValueChange={(v) => setFormValues((prev) => ({ ...prev, [f.key]: v === "none" ? "" : v }))}
+                                >
+                                  <SelectTrigger id={f.key} className="h-8">
+                                    <SelectValue placeholder="Select" />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="none">—</SelectItem>
+                                    {(f.options ?? []).map((option) => (
+                                      <SelectItem key={option} value={option}>
+                                        {option}
                                       </SelectItem>
                                     ))}
                                   </SelectContent>
                                 </Select>
-                              ) : (
-                                <Input
-                                  id={f.key}
-                                  value={getUserLabel(formValues[f.key]) || user?.full_name || user?.username || ""}
-                                  readOnly
-                                  disabled
-                                  className="h-8 text-sm"
-                                />
-                              )
-                            )}
-                            {fieldErrors[f.key] && (
-                              <p className="text-destructive text-xs">{fieldErrors[f.key]}</p>
-                            )}
-                          </div>
-                        ))}
+                              )}
+                              {f.type === "user_select" && (
+                                isAdmin ? (
+                                  <Select
+                                    value={formValues[f.key] || "none"}
+                                    onValueChange={(v) => setFormValues((prev) => ({ ...prev, [f.key]: v === "none" ? "" : v }))}
+                                  >
+                                    <SelectTrigger id={f.key} className="h-8">
+                                      <SelectValue placeholder="Select" />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                      <SelectItem value="none">—</SelectItem>
+                                      {(f.key === "fty_md_user_id" ? ftyUsers : costingUsers).map((u) => (
+                                        <SelectItem key={u.id} value={String(u.id)}>
+                                          {u.full_name?.trim() || u.username}
+                                        </SelectItem>
+                                      ))}
+                                    </SelectContent>
+                                  </Select>
+                                ) : (
+                                  <Input
+                                    id={f.key}
+                                    value={getUserLabel(formValues[f.key]) || user?.full_name || user?.username || ""}
+                                    readOnly
+                                    disabled
+                                    className="h-8 text-sm"
+                                  />
+                                )
+                              )}
+                              {fieldErrors[f.key] && (
+                                <p className="text-destructive text-xs">{fieldErrors[f.key]}</p>
+                              )}
+                            </div>
+                          )
+                        })}
                       </div>
                     )
                   }
@@ -953,15 +1257,29 @@ export default function SampleStageEditPage() {
                     </Collapsible>
                   )
                 })
-              })()}
-              <div className="flex gap-2 pt-1">
-                <Button type="submit" disabled={saving || !validationState.canSubmit} size="sm">
-                  {saving ? "Saving..." : "Save Stage"}
-                </Button>
-                <Button type="button" variant="outline" onClick={() => navigate(`/samples/${id}`)} size="sm">
-                  Cancel
-                </Button>
-              </div>
+                  })()}
+                  <div className="flex gap-2 pt-1">
+                    {!isDeliveryCompletionView && (
+                      <Button type="submit" disabled={saving || !canSave} size="sm">
+                        {saving ? "Saving..." : "Save Stage"}
+                      </Button>
+                    )}
+                    {isDeliveryCompletionView && (
+                      <Button
+                        type="button"
+                        onClick={markSampleReceivedAndComplete}
+                        disabled={saving}
+                        size="sm"
+                      >
+                        {saving ? "Completing..." : "Complete & Mark Sample Received"}
+                      </Button>
+                    )}
+                    <Button type="button" variant="outline" onClick={() => navigate(`/samples/${id}`)} size="sm">
+                      Cancel
+                    </Button>
+                  </div>
+                </>
+              )}
             </CardContent>
           </Card>
         )}
@@ -987,19 +1305,23 @@ export default function SampleStageEditPage() {
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              className="bg-secondary text-secondary-foreground hover:bg-secondary/80"
-              onClick={() => confirmAndSave(false)}
-            >
-              Save Only
-            </AlertDialogAction>
-            {currentStage && getNextStage(currentStage) && (
-              <AlertDialogAction 
-                onClick={() => confirmAndSave(true)}
-                disabled={!canAdvanceStage()}
-              >
-                Complete &amp; Advance
-              </AlertDialogAction>
+            {!isDeliveryCompletionView && (
+              <>
+                <AlertDialogAction
+                  className="bg-secondary text-secondary-foreground hover:bg-secondary/80"
+                  onClick={() => confirmAndSave(false)}
+                >
+                  Save Only
+                </AlertDialogAction>
+                {currentStage && getNextStage(currentStage) && (
+                  <AlertDialogAction 
+                    onClick={() => confirmAndSave(true)}
+                    disabled={!canAdvanceStage()}
+                  >
+                    Complete &amp; Advance
+                  </AlertDialogAction>
+                )}
+              </>
             )}
           </AlertDialogFooter>
         </AlertDialogContent>

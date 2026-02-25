@@ -6,11 +6,17 @@ const escapeCsv = (value) => {
   return /[",\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
 };
 
-const buildPerformanceData = async ({ brandId, seasonId, productCategory, month, year, startDate, endDate }) => {
+const isDeliveredStatus = (status) => {
+  const s = String(status || '').trim().toLowerCase();
+  return s.includes('deliver');
+};
+
+const buildPerformanceData = async ({ brandId, seasonId, productCategory, month, year, startDate, endDate, deliveredOnly = false }) => {
   const { data: rows, error } = await supabase
     .from('sample_request')
     .select(`
       sample_id,
+      current_status,
       sample_due_denver,
       styles(style_id, brand_id, season_id, product_category, brands(id, name)),
       shipment_to_brand(sent_date)
@@ -20,6 +26,7 @@ const buildPerformanceData = async ({ brandId, seasonId, productCategory, month,
 
   let list = (rows || []).map((r) => ({
     sample_id: r.sample_id,
+    current_status: r.current_status,
     style_id: r.styles?.style_id ?? null,
     due: r.sample_due_denver,
     actual: r.shipment_to_brand?.[0]?.sent_date ?? null,
@@ -28,6 +35,10 @@ const buildPerformanceData = async ({ brandId, seasonId, productCategory, month,
     brand_name: r.styles?.brands?.name ?? null,
     product: r.styles?.product_category ?? 'Uncategorized',
   }));
+
+  if (deliveredOnly) {
+    list = list.filter((x) => isDeliveredStatus(x.current_status));
+  }
 
   if (brandId != null) list = list.filter((x) => x.brand_id === brandId);
   if (seasonId != null) list = list.filter((x) => x.season_id === seasonId);
@@ -140,7 +151,7 @@ export const deliveryPerformance = async (req, res) => {
     const startDate = req.query.startDate ?? null;
     const endDate = req.query.endDate ?? null;
 
-    const data = await buildPerformanceData({ brandId, seasonId, productCategory, month, year, startDate, endDate });
+    const data = await buildPerformanceData({ brandId, seasonId, productCategory, month, year, startDate, endDate, deliveredOnly: true });
     return res.json(data);
   } catch (err) {
     console.error('deliveryPerformance error:', err);
@@ -160,7 +171,7 @@ export const deliveryPerformanceExport = async (req, res) => {
     const status = req.query.status ?? 'all';
     const threshold = req.query.threshold ?? 'all';
 
-    const data = await buildPerformanceData({ brandId, seasonId, productCategory, month, year, startDate, endDate });
+    const data = await buildPerformanceData({ brandId, seasonId, productCategory, month, year, startDate, endDate, deliveredOnly: true });
     let rows = data.byBrand || [];
 
     if (status !== 'all') {

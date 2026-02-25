@@ -20,11 +20,11 @@ export default function AppLayout() {
   }
 
   return (
-    <div className="flex h-screen overflow-hidden bg-background">
+    <div className="flex h-screen overflow-hidden bg-background gradient-dark-bg">
       <Sidebar collapsed={sidebarCollapsed} onToggleCollapsed={toggleSidebar} />
       <div className="flex flex-1 flex-col overflow-hidden">
         <Header />
-        <main className="flex-1 overflow-y-auto bg-background">
+        <main className="flex-1 overflow-y-auto bg-background gradient-dark-bg">
           <Outlet />
         </main>
       </div>

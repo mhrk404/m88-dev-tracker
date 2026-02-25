@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react"
+import { Link } from "react-router-dom"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import {
   Dialog,
@@ -7,15 +8,16 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
-import { getDashboard, getSubmissionPerformance } from "@/api/analytics"
+import { getDashboard } from "@/api/analytics"
 import { listSamples } from "@/api/samples"
-import type { DashboardStats, PerformanceByBrand } from "@/types/analytics"
+import type { DashboardStats } from "@/types/analytics"
 import type { Sample } from "@/types/sample"
-import { Users, Package, TrendingUp, Clock, ArrowUp, ArrowDown, Activity } from "lucide-react"
+import { Users, Package, TrendingUp, Clock, ArrowUp, ArrowDown, Activity, Truck, Calculator, FileText, Factory, ClipboardCheck, PackageCheck, ArrowRight, AlertCircle } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { DashboardSkeleton } from "@/components/ui/skeletons"
 import { formatDistanceToNow } from "date-fns"
 import { useAuth } from "@/contexts/auth"
+import { buttonVariants } from "@/components/ui/button"
 import {
   Chart as ChartJS,
   CategoryScale,
@@ -35,8 +37,6 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true)
   const [recentSamples, setRecentSamples] = useState<Sample[]>([])
   const [allSamples, setAllSamples] = useState<Sample[]>([])
-  const [brandPerformance, setBrandPerformance] = useState<PerformanceByBrand[]>([])
-  const [chartMode, setChartMode] = useState<"count" | "percent">("count")
   const [watchlistOpen, setWatchlistOpen] = useState(false)
   const [watchlistTitle, setWatchlistTitle] = useState("")
   const [watchlistSamples, setWatchlistSamples] = useState<Sample[]>([])
@@ -44,13 +44,11 @@ export default function DashboardPage() {
   useEffect(() => {
     async function loadDashboard() {
       try {
-        const [data, samples, submission] = await Promise.all([
+        const [data, samples] = await Promise.all([
           getDashboard(),
           listSamples(),
-          getSubmissionPerformance(),
         ])
         setStats(data)
-        setBrandPerformance(submission?.byBrand || [])
         const list = samples || []
         setAllSamples(list)
         const sorted = list
@@ -84,6 +82,15 @@ export default function DashboardPage() {
     )
   }
 
+  const userRole = user?.roleCode
+  const isPBD = userRole === "PBD"
+  const isCosting = userRole === "COSTING"
+  const isTD = userRole === "TD"
+  const isFTY = userRole === "FTY"
+  const isMD = userRole === "MD"
+  const isBRAND = userRole === "BRAND"
+  const isAdmin = userRole === "ADMIN" || userRole === "SUPER_ADMIN"
+
   const submissionTotal =
     stats.submission.early +
     stats.submission.on_time +
@@ -112,6 +119,11 @@ export default function DashboardPage() {
   const dueSoon14 = new Date(now)
   dueSoon14.setDate(now.getDate() + 14)
 
+  const deliveredSamples = allSamples.filter((sample) =>
+    String(sample.current_status || "").trim().toLowerCase().includes("deliver")
+  )
+  const processingSamples = allSamples.filter((sample) => !String(sample.current_status || "").trim().toLowerCase().includes("deliver"))
+
   const withDueDate = allSamples.filter((s) => s.sample_due_denver)
   const overdue = withDueDate.filter((s) => new Date(s.sample_due_denver as string) < now)
   const dueIn7 = withDueDate.filter((s) => {
@@ -123,27 +135,59 @@ export default function DashboardPage() {
     return due > dueSoon7 && due <= dueSoon14
   })
 
+  // Role-specific calculations
+  // PBD - Shipment tracking
+  const samplesAtShipment = allSamples.filter(s => s.current_stage === "SHIPMENT_TO_BRAND")
+  const missingDates = samplesAtShipment.filter(s => !s.sample_due_denver)
+  const delayedShipments = samplesAtShipment.filter(s => 
+    s.sample_due_denver && new Date(s.sample_due_denver) < now
+  )
+  const upcomingShipments = samplesAtShipment.filter(s => 
+    s.sample_due_denver && new Date(s.sample_due_denver) >= now
+  )
+  const shippedSamples = deliveredSamples
+
+  // COSTING - Costing workflow
+  const samplesAtCosting = allSamples.filter(s => s.current_stage === "COSTING")
+  const upcomingCosting = allSamples.filter(s => 
+    s.current_stage === "PC_REVIEW" || s.current_stage === "SAMPLE_DEVELOPMENT"
+  )
+
+  // TD - PSI work
+  const samplesAtPSI = allSamples.filter(s => s.current_stage === "PSI")
+  const upcomingPSI = allSamples.filter(s => !s.current_stage || s.current_stage === "")
+
+  // FTY - Factory development
+  const samplesInDevelopment = allSamples.filter(s => s.current_stage === "SAMPLE_DEVELOPMENT")
+  const upcomingFactory = allSamples.filter(s => s.current_stage === "PSI")
+
+  // MD - PC Review
+  const samplesAtPCReview = allSamples.filter(s => s.current_stage === "PC_REVIEW")
+  const upcomingReview = allSamples.filter(s => s.current_stage === "SAMPLE_DEVELOPMENT")
+
+  // BRAND - Deliveries
+  const samplesInTransit = allSamples.filter(s => s.current_stage === "SHIPMENT_TO_BRAND")
+  const samplesDelivered = deliveredSamples
+  const upcomingBrand = allSamples.filter(s => s.current_stage === "COSTING")
+
   function openWatchlist(title: string, samples: Sample[]) {
     setWatchlistTitle(title)
     setWatchlistSamples(samples)
     setWatchlistOpen(true)
   }
 
-  const brandRows = brandPerformance
-    .map((row) => {
-      const total = row.total ?? row.early + row.on_time + row.delay + row.pending
-      const safeTotal = total > 0 ? total : 1
-      return {
-        label: row.brand_name,
-        total,
-        early: row.early,
-        onTime: row.on_time,
-        delay: row.delay,
-        earlyPct: Number(((row.early / safeTotal) * 100).toFixed(1)),
-        onTimePct: Number(((row.on_time / safeTotal) * 100).toFixed(1)),
-        delayPct: Number(((row.delay / safeTotal) * 100).toFixed(1)),
-      }
-    })
+  const brandRows = deliveredSamples
+    .reduce((acc, sample) => {
+      const brandName = sample.brands?.name?.trim() || "Unknown Brand"
+      acc.set(brandName, (acc.get(brandName) || 0) + 1)
+      return acc
+    }, new Map<string, number>())
+  const deliveredBrandRows = Array.from(brandRows.entries())
+    .map(([label, delivered]) => ({
+      label,
+      delivered,
+      total: delivered,
+    }))
     .sort((a, b) => b.total - a.total)
     .slice(0, 8)
 
@@ -155,36 +199,14 @@ export default function DashboardPage() {
     maxBarThickness: 36,
   }
 
-  const earlyValues = brandRows.map((row) =>
-    chartMode === "percent" ? row.earlyPct : Math.round(row.early)
-  )
-  const onTimeValues = brandRows.map((row) =>
-    chartMode === "percent" ? row.onTimePct : Math.round(row.onTime)
-  )
-  const delayValues = brandRows.map((row) =>
-    chartMode === "percent" ? row.delayPct : Math.round(row.delay)
-  )
+  const deliveredValues = deliveredBrandRows.map((row) => Math.round(row.delivered))
 
   const datasets = [
     {
-      label: "Early",
-      data: earlyValues,
+      label: "Delivered",
+      data: deliveredValues,
       backgroundColor: "rgba(16, 185, 129, 0.85)",
       borderColor: "rgba(16, 185, 129, 1)",
-      ...baseDataset,
-    },
-    {
-      label: "On Time",
-      data: onTimeValues,
-      backgroundColor: "rgba(59, 130, 246, 0.85)",
-      borderColor: "rgba(59, 130, 246, 1)",
-      ...baseDataset,
-    },
-    {
-      label: "Delayed",
-      data: delayValues,
-      backgroundColor: "rgba(239, 68, 68, 0.85)",
-      borderColor: "rgba(239, 68, 68, 1)",
       ...baseDataset,
     },
   ].filter((dataset) => dataset.data.some((value) => Number(value) > 0))
@@ -198,7 +220,7 @@ export default function DashboardPage() {
   }))
 
   const chartData = {
-    labels: brandRows.map((row) => row.label),
+    labels: deliveredBrandRows.map((row) => row.label),
     datasets: tunedDatasets,
   }
 
@@ -219,8 +241,8 @@ export default function DashboardPage() {
           },
           label(context) {
             const value = context.parsed.y
-            const suffix = chartMode === "percent" ? "%" : ""
-            const displayValue = chartMode === "percent" ? value : Math.round(Number(value || 0))
+            const suffix = ""
+            const displayValue = Math.round(Number(value || 0))
             return `${context.dataset.label}: ${displayValue}${suffix}`
           },
         },
@@ -238,7 +260,6 @@ export default function DashboardPage() {
         beginAtZero: true,
         ticks: {
           callback(value) {
-            if (chartMode === "percent") return `${value}%`
             return Number(value).toLocaleString()
           },
         },
@@ -251,7 +272,15 @@ export default function DashboardPage() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight text-foreground">{greeting}, {displayName}</h1>
-          <p className="text-sm text-muted-foreground">Snapshot of submission flow and recent activity.</p>
+          <p className="text-sm text-muted-foreground">
+            {isPBD && "Track sample shipments and delivery schedules"}
+            {isCosting && "Monitor costing data entry workflow"}
+            {isTD && "Manage PSI submissions and technical design work"}
+            {isFTY && "Track factory sample development"}
+            {isMD && "Review samples at PC Review stage"}
+            {isBRAND && "Monitor sample deliveries and shipments"}
+            {isAdmin && "Overview of all system activity"}
+          </p>
         </div>
         <div className="inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs text-muted-foreground">
           <span className="h-2 w-2 rounded-full bg-emerald-500" />
@@ -259,18 +288,511 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
-            <CardTitle className="text-sm font-medium text-muted-foreground">Total Samples</CardTitle>
-            <Package className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent className="space-y-1">
-            <div className="text-3xl font-bold text-foreground">{submissionTotal.toLocaleString()}</div>
-            <p className="text-xs text-muted-foreground">Active samples in system</p>
-            <p className="text-xs text-muted-foreground">Total for the last period</p>
-          </CardContent>
-        </Card>
+      {/* PBD Dashboard */}
+      {isPBD && (
+        <>
+          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
+                <CardTitle className="text-sm font-medium text-muted-foreground">Missing Dates</CardTitle>
+                <AlertCircle className="h-4 w-4 text-amber-500" />
+              </CardHeader>
+              <CardContent className="space-y-1">
+                <div className="text-3xl font-bold text-foreground">{missingDates.length.toLocaleString()}</div>
+                <p className="text-xs text-muted-foreground">At shipment stage</p>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
+                <CardTitle className="text-sm font-medium text-muted-foreground">Delayed</CardTitle>
+                <Clock className="h-4 w-4 text-destructive" />
+              </CardHeader>
+              <CardContent className="space-y-1">
+                <div className="text-3xl font-bold text-foreground">{delayedShipments.length.toLocaleString()}</div>
+                <p className="text-xs text-muted-foreground">Past due date</p>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
+                <CardTitle className="text-sm font-medium text-muted-foreground">Upcoming</CardTitle>
+                <Truck className="h-4 w-4 text-blue-500" />
+              </CardHeader>
+              <CardContent className="space-y-1">
+                <div className="text-3xl font-bold text-foreground">{upcomingShipments.length.toLocaleString()}</div>
+                <p className="text-xs text-muted-foreground">Ready to ship</p>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
+                <CardTitle className="text-sm font-medium text-muted-foreground">Shipped</CardTitle>
+                <PackageCheck className="h-4 w-4 text-green-500" />
+              </CardHeader>
+              <CardContent className="space-y-1">
+                <div className="text-3xl font-bold text-foreground">{shippedSamples.length.toLocaleString()}</div>
+                <p className="text-xs text-muted-foreground">Delivered</p>
+              </CardContent>
+            </Card>
+          </div>
+
+          <Card>
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle>Shipment Monitoring</CardTitle>
+                  <CardDescription>Quick access to your monitoring dashboard</CardDescription>
+                </div>
+                <Link to="/pbd/monitoring" className={buttonVariants({ variant: "default" })}>
+                  View Full Monitoring <ArrowRight className="ml-2 h-4 w-4" />
+                </Link>
+              </div>
+            </CardHeader>
+            <CardContent>
+              <div className="grid gap-3">
+                <div className="flex items-center justify-between rounded-lg border p-3">
+                  <div className="flex items-center gap-3">
+                    <AlertCircle className="h-5 w-5 text-amber-500" />
+                    <div>
+                      <p className="text-sm font-medium">Missing/Delayed Shipments</p>
+                      <p className="text-xs text-muted-foreground">Requires immediate attention</p>
+                    </div>
+                  </div>
+                  <span className="text-lg font-semibold">{missingDates.length + delayedShipments.length}</span>
+                </div>
+                <div className="flex items-center justify-between rounded-lg border p-3">
+                  <div className="flex items-center gap-3">
+                    <Truck className="h-5 w-5 text-blue-500" />
+                    <div>
+                      <p className="text-sm font-medium">Upcoming Shipments</p>
+                      <p className="text-xs text-muted-foreground">Scheduled for dispatch</p>
+                    </div>
+                  </div>
+                  <span className="text-lg font-semibold">{upcomingShipments.length}</span>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </>
+      )}
+
+      {/* COSTING Dashboard */}
+      {isCosting && (
+        <>
+          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
+                <CardTitle className="text-sm font-medium text-muted-foreground">To Enter in NG</CardTitle>
+                <Calculator className="h-4 w-4 text-amber-500" />
+              </CardHeader>
+              <CardContent className="space-y-1">
+                <div className="text-3xl font-bold text-foreground">{samplesAtCosting.length.toLocaleString()}</div>
+                <p className="text-xs text-muted-foreground">At costing stage</p>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
+                <CardTitle className="text-sm font-medium text-muted-foreground">Upcoming Work</CardTitle>
+                <Clock className="h-4 w-4 text-blue-500" />
+              </CardHeader>
+              <CardContent className="space-y-1">
+                <div className="text-3xl font-bold text-foreground">{upcomingCosting.length.toLocaleString()}</div>
+                <p className="text-xs text-muted-foreground">In earlier stages</p>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
+                <CardTitle className="text-sm font-medium text-muted-foreground">Total Processed</CardTitle>
+                <PackageCheck className="h-4 w-4 text-green-500" />
+              </CardHeader>
+              <CardContent className="space-y-1">
+                <div className="text-3xl font-bold text-foreground">{deliveredSamples.length.toLocaleString()}</div>
+                <p className="text-xs text-muted-foreground">Completed samples</p>
+              </CardContent>
+            </Card>
+          </div>
+
+          <Card>
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle>Costing Monitoring</CardTitle>
+                  <CardDescription>Track costing data entry workflow</CardDescription>
+                </div>
+                <Link to="/costing/monitoring" className={buttonVariants({ variant: "default" })}>
+                  View Full Monitoring <ArrowRight className="ml-2 h-4 w-4" />
+                </Link>
+              </div>
+            </CardHeader>
+            <CardContent>
+              <div className="grid gap-3">
+                <div className="flex items-center justify-between rounded-lg border p-3">
+                  <div className="flex items-center gap-3">
+                    <Calculator className="h-5 w-5 text-amber-500" />
+                    <div>
+                      <p className="text-sm font-medium">Awaiting Costing Data</p>
+                      <p className="text-xs text-muted-foreground">Ready for entry in NG</p>
+                    </div>
+                  </div>
+                  <span className="text-lg font-semibold">{samplesAtCosting.length}</span>
+                </div>
+                <div className="flex items-center justify-between rounded-lg border p-3">
+                  <div className="flex items-center gap-3">
+                    <Clock className="h-5 w-5 text-blue-500" />
+                    <div>
+                      <p className="text-sm font-medium">Upcoming Costing</p>
+                      <p className="text-xs text-muted-foreground">In development pipeline</p>
+                    </div>
+                  </div>
+                  <span className="text-lg font-semibold">{upcomingCosting.length}</span>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </>
+      )}
+
+      {/* TD Dashboard */}
+      {isTD && (
+        <>
+          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
+                <CardTitle className="text-sm font-medium text-muted-foreground">Current PSI Work</CardTitle>
+                <FileText className="h-4 w-4 text-amber-500" />
+              </CardHeader>
+              <CardContent className="space-y-1">
+                <div className="text-3xl font-bold text-foreground">{samplesAtPSI.length.toLocaleString()}</div>
+                <p className="text-xs text-muted-foreground">At PSI stage</p>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
+                <CardTitle className="text-sm font-medium text-muted-foreground">Upcoming Work</CardTitle>
+                <Clock className="h-4 w-4 text-blue-500" />
+              </CardHeader>
+              <CardContent className="space-y-1">
+                <div className="text-3xl font-bold text-foreground">{upcomingPSI.length.toLocaleString()}</div>
+                <p className="text-xs text-muted-foreground">New submissions</p>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
+                <CardTitle className="text-sm font-medium text-muted-foreground">Completed</CardTitle>
+                <PackageCheck className="h-4 w-4 text-green-500" />
+              </CardHeader>
+              <CardContent className="space-y-1">
+                <div className="text-3xl font-bold text-foreground">{deliveredSamples.length.toLocaleString()}</div>
+                <p className="text-xs text-muted-foreground">Delivered samples</p>
+              </CardContent>
+            </Card>
+          </div>
+
+          <Card>
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle>TD Monitoring</CardTitle>
+                  <CardDescription>Track PSI submissions and technical design work</CardDescription>
+                </div>
+                <Link to="/td/monitoring" className={buttonVariants({ variant: "default" })}>
+                  View Full Monitoring <ArrowRight className="ml-2 h-4 w-4" />
+                </Link>
+              </div>
+            </CardHeader>
+            <CardContent>
+              <div className="grid gap-3">
+                <div className="flex items-center justify-between rounded-lg border p-3">
+                  <div className="flex items-center gap-3">
+                    <FileText className="h-5 w-5 text-amber-500" />
+                    <div>
+                      <p className="text-sm font-medium">Active PSI Work</p>
+                      <p className="text-xs text-muted-foreground">Samples at PSI stage</p>
+                    </div>
+                  </div>
+                  <span className="text-lg font-semibold">{samplesAtPSI.length}</span>
+                </div>
+                <div className="flex items-center justify-between rounded-lg border p-3">
+                  <div className="flex items-center gap-3">
+                    <Clock className="h-5 w-5 text-blue-500" />
+                    <div>
+                      <p className="text-sm font-medium">New Submissions</p>
+                      <p className="text-xs text-muted-foreground">Awaiting PSI start</p>
+                    </div>
+                  </div>
+                  <span className="text-lg font-semibold">{upcomingPSI.length}</span>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </>
+      )}
+
+      {/* FTY Dashboard */}
+      {isFTY && (
+        <>
+          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
+                <CardTitle className="text-sm font-medium text-muted-foreground">In Development</CardTitle>
+                <Factory className="h-4 w-4 text-amber-500" />
+              </CardHeader>
+              <CardContent className="space-y-1">
+                <div className="text-3xl font-bold text-foreground">{samplesInDevelopment.length.toLocaleString()}</div>
+                <p className="text-xs text-muted-foreground">Active production</p>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
+                <CardTitle className="text-sm font-medium text-muted-foreground">Upcoming Orders</CardTitle>
+                <Clock className="h-4 w-4 text-blue-500" />
+              </CardHeader>
+              <CardContent className="space-y-1">
+                <div className="text-3xl font-bold text-foreground">{upcomingFactory.length.toLocaleString()}</div>
+                <p className="text-xs text-muted-foreground">From PSI stage</p>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
+                <CardTitle className="text-sm font-medium text-muted-foreground">Completed</CardTitle>
+                <PackageCheck className="h-4 w-4 text-green-500" />
+              </CardHeader>
+              <CardContent className="space-y-1">
+                <div className="text-3xl font-bold text-foreground">{deliveredSamples.length.toLocaleString()}</div>
+                <p className="text-xs text-muted-foreground">Delivered samples</p>
+              </CardContent>
+            </Card>
+          </div>
+
+          <Card>
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle>Factory Monitoring</CardTitle>
+                  <CardDescription>Track sample development and production</CardDescription>
+                </div>
+                <Link to="/fty/monitoring" className={buttonVariants({ variant: "default" })}>
+                  View Full Monitoring <ArrowRight className="ml-2 h-4 w-4" />
+                </Link>
+              </div>
+            </CardHeader>
+            <CardContent>
+              <div className="grid gap-3">
+                <div className="flex items-center justify-between rounded-lg border p-3">
+                  <div className="flex items-center gap-3">
+                    <Factory className="h-5 w-5 text-amber-500" />
+                    <div>
+                      <p className="text-sm font-medium">In Production</p>
+                      <p className="text-xs text-muted-foreground">Active sample development</p>
+                    </div>
+                  </div>
+                  <span className="text-lg font-semibold">{samplesInDevelopment.length}</span>
+                </div>
+                <div className="flex items-center justify-between rounded-lg border p-3">
+                  <div className="flex items-center gap-3">
+                    <Clock className="h-5 w-5 text-blue-500" />
+                    <div>
+                      <p className="text-sm font-medium">Upcoming Orders</p>
+                      <p className="text-xs text-muted-foreground">Ready for production</p>
+                    </div>
+                  </div>
+                  <span className="text-lg font-semibold">{upcomingFactory.length}</span>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </>
+      )}
+
+      {/* MD Dashboard */}
+      {isMD && (
+        <>
+          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
+                <CardTitle className="text-sm font-medium text-muted-foreground">For PC Review</CardTitle>
+                <ClipboardCheck className="h-4 w-4 text-amber-500" />
+              </CardHeader>
+              <CardContent className="space-y-1">
+                <div className="text-3xl font-bold text-foreground">{samplesAtPCReview.length.toLocaleString()}</div>
+                <p className="text-xs text-muted-foreground">Awaiting review</p>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
+                <CardTitle className="text-sm font-medium text-muted-foreground">Upcoming Review</CardTitle>
+                <Clock className="h-4 w-4 text-blue-500" />
+              </CardHeader>
+              <CardContent className="space-y-1">
+                <div className="text-3xl font-bold text-foreground">{upcomingReview.length.toLocaleString()}</div>
+                <p className="text-xs text-muted-foreground">In development</p>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
+                <CardTitle className="text-sm font-medium text-muted-foreground">Reviewed</CardTitle>
+                <PackageCheck className="h-4 w-4 text-green-500" />
+              </CardHeader>
+              <CardContent className="space-y-1">
+                <div className="text-3xl font-bold text-foreground">{deliveredSamples.length.toLocaleString()}</div>
+                <p className="text-xs text-muted-foreground">Delivered samples</p>
+              </CardContent>
+            </Card>
+          </div>
+
+          <Card>
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle>MD Monitoring</CardTitle>
+                  <CardDescription>Track PC review workflow</CardDescription>
+                </div>
+                <Link to="/md/monitoring" className={buttonVariants({ variant: "default" })}>
+                  View Full Monitoring <ArrowRight className="ml-2 h-4 w-4" />
+                </Link>
+              </div>
+            </CardHeader>
+            <CardContent>
+              <div className="grid gap-3">
+                <div className="flex items-center justify-between rounded-lg border p-3">
+                  <div className="flex items-center gap-3">
+                    <ClipboardCheck className="h-5 w-5 text-amber-500" />
+                    <div>
+                      <p className="text-sm font-medium">Awaiting PC Review</p>
+                      <p className="text-xs text-muted-foreground">Ready for review</p>
+                    </div>
+                  </div>
+                  <span className="text-lg font-semibold">{samplesAtPCReview.length}</span>
+                </div>
+                <div className="flex items-center justify-between rounded-lg border p-3">
+                  <div className="flex items-center gap-3">
+                    <Clock className="h-5 w-5 text-blue-500" />
+                    <div>
+                      <p className="text-sm font-medium">In Development</p>
+                      <p className="text-xs text-muted-foreground">Upcoming for review</p>
+                    </div>
+                  </div>
+                  <span className="text-lg font-semibold">{upcomingReview.length}</span>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </>
+      )}
+
+      {/* BRAND Dashboard */}
+      {isBRAND && (
+        <>
+          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
+                <CardTitle className="text-sm font-medium text-muted-foreground">In Transit</CardTitle>
+                <Truck className="h-4 w-4 text-amber-500" />
+              </CardHeader>
+              <CardContent className="space-y-1">
+                <div className="text-3xl font-bold text-foreground">{samplesInTransit.length.toLocaleString()}</div>
+                <p className="text-xs text-muted-foreground">Being shipped</p>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
+                <CardTitle className="text-sm font-medium text-muted-foreground">Delivered</CardTitle>
+                <PackageCheck className="h-4 w-4 text-green-500" />
+              </CardHeader>
+              <CardContent className="space-y-1">
+                <div className="text-3xl font-bold text-foreground">{samplesDelivered.length.toLocaleString()}</div>
+                <p className="text-xs text-muted-foreground">Received</p>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
+                <CardTitle className="text-sm font-medium text-muted-foreground">Upcoming</CardTitle>
+                <Clock className="h-4 w-4 text-blue-500" />
+              </CardHeader>
+              <CardContent className="space-y-1">
+                <div className="text-3xl font-bold text-foreground">{upcomingBrand.length.toLocaleString()}</div>
+                <p className="text-xs text-muted-foreground">In costing</p>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
+                <CardTitle className="text-sm font-medium text-muted-foreground">Total</CardTitle>
+                <Package className="h-4 w-4 text-muted-foreground" />
+              </CardHeader>
+              <CardContent className="space-y-1">
+                <div className="text-3xl font-bold text-foreground">{allSamples.length.toLocaleString()}</div>
+                <p className="text-xs text-muted-foreground">All samples</p>
+              </CardContent>
+            </Card>
+          </div>
+
+          <Card>
+            <CardHeader>
+              <div className="flex items-center justify-between">
+                <div>
+                  <CardTitle>Brand Monitoring</CardTitle>
+                  <CardDescription>Track sample shipments and deliveries</CardDescription>
+                </div>
+                <Link to="/brand/monitoring" className={buttonVariants({ variant: "default" })}>
+                  View Full Monitoring <ArrowRight className="ml-2 h-4 w-4" />
+                </Link>
+              </div>
+            </CardHeader>
+            <CardContent>
+              <div className="grid gap-3">
+                <div className="flex items-center justify-between rounded-lg border p-3">
+                  <div className="flex items-center gap-3">
+                    <Truck className="h-5 w-5 text-amber-500" />
+                    <div>
+                      <p className="text-sm font-medium">In Transit</p>
+                      <p className="text-xs text-muted-foreground">Currently being shipped</p>
+                    </div>
+                  </div>
+                  <span className="text-lg font-semibold">{samplesInTransit.length}</span>
+                </div>
+                <div className="flex items-center justify-between rounded-lg border p-3">
+                  <div className="flex items-center gap-3">
+                    <PackageCheck className="h-5 w-5 text-green-500" />
+                    <div>
+                      <p className="text-sm font-medium">Delivered</p>
+                      <p className="text-xs text-muted-foreground">Successfully received</p>
+                    </div>
+                  </div>
+                  <span className="text-lg font-semibold">{samplesDelivered.length}</span>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </>
+      )}
+
+      {/* ADMIN Dashboard */}
+      {isAdmin && (
+        <>
+          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
+                <CardTitle className="text-sm font-medium text-muted-foreground">Total Samples</CardTitle>
+                <Package className="h-4 w-4 text-muted-foreground" />
+              </CardHeader>
+              <CardContent className="space-y-1">
+                <div className="text-3xl font-bold text-foreground">{submissionTotal.toLocaleString()}</div>
+                <p className="text-xs text-muted-foreground">Delivered samples in system</p>
+                <p className="text-xs text-muted-foreground">Analytics focused on Delivered status</p>
+              </CardContent>
+            </Card>
 
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
@@ -320,13 +842,13 @@ export default function DashboardPage() {
 
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
-            <CardTitle className="text-sm font-medium text-muted-foreground">Pending</CardTitle>
+            <CardTitle className="text-sm font-medium text-muted-foreground">Processing Samples</CardTitle>
             <Users className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent className="space-y-1">
-            <div className="text-3xl font-bold text-foreground">{stats.submission.pending.toLocaleString()}</div>
-            <p className="text-xs text-muted-foreground">Awaiting submission</p>
-            <p className="text-xs text-muted-foreground">Samples pending review</p>
+            <div className="text-3xl font-bold text-foreground">{processingSamples.length.toLocaleString()}</div>
+            <p className="text-xs text-muted-foreground">Not yet delivered</p>
+            <p className="text-xs text-muted-foreground">Processing samples count</p>
           </CardContent>
         </Card>
       </div>
@@ -337,34 +859,12 @@ export default function DashboardPage() {
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
                 <CardTitle className="text-lg font-semibold">Brand Performance</CardTitle>
-                <CardDescription className="text-sm">Grouped view of early, on-time, and delayed counts</CardDescription>
-              </div>
-              <div className="inline-flex items-center rounded-full border p-1 text-xs">
-                <button
-                  type="button"
-                  onClick={() => setChartMode("count")}
-                  className={cn(
-                    "rounded-full px-3 py-1 transition-colors",
-                    chartMode === "count" ? "bg-foreground text-background" : "text-muted-foreground"
-                  )}
-                >
-                  Counts
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setChartMode("percent")}
-                  className={cn(
-                    "rounded-full px-3 py-1 transition-colors",
-                    chartMode === "percent" ? "bg-foreground text-background" : "text-muted-foreground"
-                  )}
-                >
-                  Percent
-                </button>
+                <CardDescription className="text-sm">Delivered sample count by brand</CardDescription>
               </div>
             </div>
           </CardHeader>
           <CardContent>
-            {brandRows.length === 0 || datasets.length === 0 ? (
+            {deliveredBrandRows.length === 0 || datasets.length === 0 ? (
               <div className="text-sm text-muted-foreground">No brand data available.</div>
             ) : (
               <div className="h-[360px] w-full">
@@ -430,7 +930,7 @@ export default function DashboardPage() {
             {recentSamples.length === 0 ? (
               <div className="text-sm text-muted-foreground">No recent activity found.</div>
             ) : (
-              <div className="space-y-3">
+              <div className="space-y-3 max-h-[360px] overflow-y-auto pr-1">
                 {recentSamples.map((sample) => (
                   <div key={sample.id} className="flex items-start justify-between gap-3 rounded-lg border p-3">
                     <div className="flex items-start gap-3">
@@ -456,6 +956,48 @@ export default function DashboardPage() {
           </CardContent>
         </Card>
       </div>
+        </>
+      )}
+
+      {/* Common Section - Recent Activities (shown to non-admin roles) */}
+      {!isAdmin && (
+        <div className="grid gap-4">
+          <Card>
+            <CardHeader className="pb-4">
+              <CardTitle className="text-lg font-semibold">Recent Activities</CardTitle>
+              <CardDescription className="text-sm">Latest updates across samples</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {recentSamples.length === 0 ? (
+                <div className="text-sm text-muted-foreground">No recent activity found.</div>
+              ) : (
+                <div className="space-y-3 max-h-[360px] overflow-y-auto pr-1">
+                  {recentSamples.map((sample) => (
+                    <div key={sample.id} className="flex items-start justify-between gap-3 rounded-lg border p-3">
+                      <div className="flex items-start gap-3">
+                        <div className="mt-0.5 flex h-9 w-9 items-center justify-center rounded-full bg-muted">
+                          <Activity className="h-4 w-4 text-muted-foreground" />
+                        </div>
+                        <div>
+                          <p className="text-sm font-medium text-foreground">
+                            {sample.style_number} · {sample.style_name || "Untitled"}
+                          </p>
+                          <p className="text-xs text-muted-foreground">
+                            {sample.current_status || "Status updated"} · {sample.current_stage || "Stage"}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="text-xs text-muted-foreground">
+                        {formatDistanceToNow(new Date(sample.updated_at), { addSuffix: true })}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+      )}
 
       <Dialog open={watchlistOpen} onOpenChange={setWatchlistOpen}>
         <DialogContent className="max-w-2xl">

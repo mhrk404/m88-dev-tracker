@@ -199,6 +199,8 @@ export const remove = async (req, res) => {
       { table: 'team_assignment', column: 'fty_md2_user_id' },
       { table: 'team_assignment', column: 'md_user_id' },
       { table: 'team_assignment', column: 'costing_user_id' },
+      { table: 'sample_role_owner', column: 'user_id' },
+      { table: 'sample_role_owner', column: 'entered_by' },
       { table: 'stage_audit_log', column: 'user_id' },
       { table: 'audit_log', column: 'user_id' },
     ];

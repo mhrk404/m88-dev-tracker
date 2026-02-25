@@ -24,6 +24,12 @@ import {
   DialogDescription,
   DialogFooter,
 } from "@/components/ui/dialog"
+import {
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from "@/components/ui/tabs"
 import { DetailSkeleton } from "@/components/ui/skeletons"
 import {
   Breadcrumb,
@@ -52,6 +58,7 @@ import { cn } from "@/lib/utils"
 import { getStatusColor } from "@/lib/statusColors"
 import { fetchShipmentByTracking, type ShipmentLookupResult } from "@/api/shipping"
 import { updateStage } from "@/api/stages"
+import ActivityLogs from "@/components/activity/ActivityLogs"
 
 const stageSteps = [
   { key: STAGES.PSI, label: "PSI", name: "PSI Intake (Business Development)", icon: ClipboardList },
@@ -124,7 +131,7 @@ function effectiveStageIndex(stage: string | null | undefined, status: string | 
   if (normalizedStatus === "COMPLETED" || normalizedStatus === "DELIVERED") {
     return stageSteps.findIndex((s) => s.key === STAGES.DELIVERED_CONFIRMATION)
   }
-  if (normalizedStatus === "CANCELLED") {
+  if (normalizedStatus === "CANCELLED" || normalizedStatus === "CANCELED" || normalizedStatus === "DROPPED") {
     return stageSteps.length - 1
   }
   return currentStageIndex(stage)
@@ -132,7 +139,7 @@ function effectiveStageIndex(stage: string | null | undefined, status: string | 
 
 function formatStatusDisplay(status: string | null | undefined, stage: string | null | undefined): string {
   if (!status) return "-"
-  if (status === "PROCESSING" && stage) {
+  if (status.trim().toUpperCase() === "PROCESSING" && stage) {
     const stageStep = stageSteps.find((s) => s.key.toLowerCase() === stage.toLowerCase())
     const stageName = stageStep?.name || stage
     return `Processing / ${stageName}`
@@ -301,12 +308,29 @@ export default function SampleDetailPage() {
   }
 
   const effectiveStageIdx = effectiveStageIndex(sample.current_stage, sample.current_status)
+  const deliveredStageIdx = stageSteps.findIndex((s) => s.key === STAGES.DELIVERED_CONFIRMATION)
+  const isDeliveredFlow = effectiveStageIdx === deliveredStageIdx
 
   const progressPct =
     stageSteps.length > 1 ? (effectiveStageIdx / (stageSteps.length - 1)) * 100 : 0
   const currentStatusColor = getStatusColor(sample.current_status)
 
   const assignment = getSingleRelation(sample.team_assignment)
+  const roleOwnersMap = sample.sample_role_owners_map ?? {}
+  const roleOwnerName = (roleKey: "PBD_SAMPLE_CREATION" | "TD_PSI_INTAKE" | "FTY_MD_DEVELOPMENT" | "MD_M88_DECISION" | "COSTING_TEAM_COST_SHEET" | "PBD_BRAND_TRACKING") => {
+    const row = roleOwnersMap?.[roleKey]
+    const fullName = row?.user?.full_name?.trim()
+    return fullName || row?.user?.username || "-"
+  }
+  const pbdCreationOwner = roleOwnerName("PBD_SAMPLE_CREATION")
+  const pbdTrackingOwner = roleOwnerName("PBD_BRAND_TRACKING")
+  const pbdFallbackOwner = assignment?.pbd?.full_name || "-"
+  const pbdRoleDisplay = (() => {
+    const names = [pbdCreationOwner, pbdTrackingOwner].filter((name) => name !== "-")
+    if (names.length === 0) return pbdFallbackOwner
+    if (names.length === 1) return names[0]
+    return names[0] === names[1] ? names[0] : `${names[0]} / ${names[1]}`
+  })()
   const psi = sample.stages?.psi
   const dev = sample.stages?.sample_development
   const pc = sample.stages?.pc_review
@@ -315,17 +339,6 @@ export default function SampleDetailPage() {
   const scf = (sample.stages as Record<string, StageData | null | undefined>)?.scf ?? null
 
   const requestedLeadTime = sample.requested_lead_time ?? dayDiffSafe(sample.kickoff_date, sample.sample_due_denver)
-  // Excel logic: =IF(AZ14=0," ",IF(AZ14>17,"STND", IF(AND(AZ14>=1,AZ14<=17),"RUSH")))
-  let requestedLeadBucket = " "
-  if (requestedLeadTime != null) {
-    if (requestedLeadTime === 0) {
-      requestedLeadBucket = " "
-    } else if (requestedLeadTime > 17) {
-      requestedLeadBucket = "STND"
-    } else if (requestedLeadTime >= 1 && requestedLeadTime <= 17) {
-      requestedLeadBucket = "RUSH"
-    }
-  }
   const psiSentDate = (psi?.sent_date as string | undefined) ?? null
   const actualShipDate = (dev?.actual_send as string | undefined) ?? null
   const targetXfactory = (dev?.target_xfty as string | undefined) ?? null
@@ -393,16 +406,12 @@ export default function SampleDetailPage() {
   }
 
   const additionalRows: Array<{ label: string; value: string }> = [
-    { label: "PBD", value: assignment?.pbd?.full_name || "-" },
-    { label: "TD", value: assignment?.td?.full_name || "-" },
-    { label: "FTY MD2", value: assignment?.fty_md2?.full_name || "-" },
-    { label: "MD M88", value: assignment?.md?.full_name || "-" },
-    { label: "Costing Team", value: assignment?.costing?.full_name || "-" },
-    { label: "Season/Brand", value: `${sample.seasons ? `${sample.seasons.code || sample.seasons.name} ${sample.seasons.year}` : "-"} / ${sample.brands?.name || "-"}` },
-    { label: "Style#/Name", value: `${sample.style_number || "-"} / ${sample.style_name || "-"}` },
+    { label: "PBD", value: pbdRoleDisplay },
+    { label: "TD", value: roleOwnerName("TD_PSI_INTAKE") !== "-" ? roleOwnerName("TD_PSI_INTAKE") : (assignment?.td?.full_name || "-") },
+    { label: "FTY MD", value: roleOwnerName("FTY_MD_DEVELOPMENT") !== "-" ? roleOwnerName("FTY_MD_DEVELOPMENT") : (assignment?.fty_md2?.full_name || "-") },
+    { label: "MD M88", value: roleOwnerName("MD_M88_DECISION") !== "-" ? roleOwnerName("MD_M88_DECISION") : (assignment?.md?.full_name || "-") },
+    { label: "Costing Team", value: roleOwnerName("COSTING_TEAM_COST_SHEET") !== "-" ? roleOwnerName("COSTING_TEAM_COST_SHEET") : (assignment?.costing?.full_name || "-") },
     { label: "Sample Type Group", value: sample.sample_type_group || sample.sample_type || "-" },
-    { label: "Requested Lead Time", value: requestedLeadTime != null ? String(requestedLeadTime) : "-" },
-    { label: "REQUESTED LEAD TIME to DEN", value: requestedLeadBucket },
     { label: "PSI Creation Work Week", value: (psi?.work_week as string | undefined) || toWeekRange(psiSentDate) },
     { label: "PSI Turn Time (Days)", value: String(dayDiffSafe(sample.kickoff_date, psiSentDate) ?? 0) },
     { label: "PSI Month", value: (psi?.month as number | undefined)?.toString() || monthShort(psiSentDate) },
@@ -790,10 +799,13 @@ export default function SampleDetailPage() {
               {stageSteps.map((step, idx) => {
                 const isCompleted = idx < effectiveStageIdx
                 const isCurrent = idx === effectiveStageIdx
+                const isDeliveredStep = step.key === STAGES.DELIVERED_CONFIRMATION && isDeliveredFlow && isCurrent
                 const StepIcon = step.icon
                 const dotClass = isCompleted
                   ? "bg-emerald-500"
-                  : isCurrent
+                  : isDeliveredStep
+                    ? "bg-emerald-500"
+                    : isCurrent
                     ? currentStatusColor
                     : "bg-muted-foreground/40"
 
@@ -827,10 +839,17 @@ export default function SampleDetailPage() {
                         <StepIcon className="h-3.5 w-3.5" />
                         <span>{step.label}</span>
                         {isCurrent && (
-                          <Badge variant="default" className="h-4 px-1.5 text-[10px] leading-none">
-                            <CircleDot className="mr-1 h-2.5 w-2.5" />
-                            Current
-                          </Badge>
+                          isDeliveredStep ? (
+                            <Badge variant="secondary" className="h-4 px-1.5 text-[10px] leading-none bg-emerald-500 text-white">
+                              <CircleDot className="mr-1 h-2.5 w-2.5" />
+                              Delivered
+                            </Badge>
+                          ) : (
+                            <Badge variant="default" className="h-4 px-1.5 text-[10px] leading-none">
+                              <CircleDot className="mr-1 h-2.5 w-2.5" />
+                              Current
+                            </Badge>
+                          )
                         )}
                       </div>
                       <div className="text-xs text-muted-foreground">{step.name}</div>
@@ -863,68 +882,89 @@ export default function SampleDetailPage() {
         </CardContent>
       </Card>
 
-      {(sample.shipping || []).length > 0 && (
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm">Shipping</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="h-9">AWB</TableHead>
-                  <TableHead className="h-9">Origin</TableHead>
-                  <TableHead className="h-9">Destination</TableHead>
-                  <TableHead className="h-9">Status</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {(sample.shipping || []).map((ship) => (
-                  <TableRow key={ship.id}>
-                    <TableCell className="py-2">{ship.awb || "-"}</TableCell>
-                    <TableCell className="py-2">{ship.origin || "-"}</TableCell>
-                    <TableCell className="py-2">{ship.destination || "-"}</TableCell>
-                    <TableCell className="py-2">{ship.status || "-"}</TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </CardContent>
-        </Card>
-      )}
+      {/* Tabs for Shipping, Status Transitions, and Activity Logs */}
+      <Tabs defaultValue="activity" className="w-full">
+        <TabsList className="grid w-full grid-cols-3">
+          <TabsTrigger value="activity">Activity Logs</TabsTrigger>
+          {(sample.shipping || []).length > 0 && <TabsTrigger value="shipping">Shipping</TabsTrigger>}
+          {(sample.status_transitions || []).length > 0 && <TabsTrigger value="transitions">Status Changes</TabsTrigger>}
+        </TabsList>
 
-      {(sample.status_transitions || []).length > 0 && (
-        <Card>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm">Status Transitions</CardTitle>
-            <CardDescription className="text-xs">History of status and stage changes</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="h-9">From</TableHead>
-                  <TableHead className="h-9">To</TableHead>
-                  <TableHead className="h-9">Stage</TableHead>
-                  <TableHead className="h-9">Date</TableHead>
-                  <TableHead className="h-9">Notes</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {(sample.status_transitions || []).map((transition) => (
-                  <TableRow key={transition.id}>
-                    <TableCell className="py-2">{transition.from_status || "-"}</TableCell>
-                    <TableCell className="py-2">{transition.to_status || "-"}</TableCell>
-                    <TableCell className="py-2">{transition.stage || "-"}</TableCell>
-                    <TableCell className="py-2 text-xs">{new Date(transition.transitioned_at).toLocaleString()}</TableCell>
-                    <TableCell className="py-2">{transition.notes || "-"}</TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </CardContent>
-        </Card>
-      )}
+        <TabsContent value="activity" className="space-y-4">
+          <ActivityLogs sampleId={id!} />
+        </TabsContent>
+
+        {(sample.shipping || []).length > 0 && (
+          <TabsContent value="shipping">
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm">Shipping Records</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <div className="overflow-x-auto">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead className="h-9">AWB</TableHead>
+                        <TableHead className="h-9">Origin</TableHead>
+                        <TableHead className="h-9">Destination</TableHead>
+                        <TableHead className="h-9">Status</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {(sample.shipping || []).map((ship) => (
+                        <TableRow key={ship.id}>
+                          <TableCell className="py-2">{ship.awb || "-"}</TableCell>
+                          <TableCell className="py-2">{ship.origin || "-"}</TableCell>
+                          <TableCell className="py-2">{ship.destination || "-"}</TableCell>
+                          <TableCell className="py-2">{ship.status || "-"}</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              </CardContent>
+            </Card>
+          </TabsContent>
+        )}
+
+        {(sample.status_transitions || []).length > 0 && (
+          <TabsContent value="transitions">
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm">Status Transitions</CardTitle>
+                <CardDescription className="text-xs">History of status and stage changes</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="overflow-x-auto">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead className="h-9">From</TableHead>
+                        <TableHead className="h-9">To</TableHead>
+                        <TableHead className="h-9">Stage</TableHead>
+                        <TableHead className="h-9">Date</TableHead>
+                        <TableHead className="h-9">Notes</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {(sample.status_transitions || []).map((transition) => (
+                        <TableRow key={transition.id}>
+                          <TableCell className="py-2">{transition.from_status || "-"}</TableCell>
+                          <TableCell className="py-2">{transition.to_status || "-"}</TableCell>
+                          <TableCell className="py-2">{transition.stage || "-"}</TableCell>
+                          <TableCell className="py-2 text-xs">{new Date(transition.transitioned_at).toLocaleString()}</TableCell>
+                          <TableCell className="py-2">{transition.notes || "-"}</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              </CardContent>
+            </Card>
+          </TabsContent>
+        )}
+      </Tabs>
     </div>
   )
 }
