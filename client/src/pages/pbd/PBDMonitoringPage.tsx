@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo } from "react"
+import { useEffect, useState, useMemo, useCallback } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button, buttonVariants } from "@/components/ui/button"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -7,15 +7,23 @@ import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { cn } from "@/lib/utils"
-import { listSamples } from "@/api/samples"
+import { getSampleFull, listSamples } from "@/api/samples"
 import type { Sample } from "@/types/sample"
-import { AlertTriangle, Clock, CheckCircle2, ExternalLink, Search, X } from "lucide-react"
+import { AlertTriangle, Clock, CheckCircle2, ExternalLink, Search, X, ArrowUpDown } from "lucide-react"
 import { DashboardSkeleton } from "@/components/ui/skeletons"
-import { formatDistanceToNow, format, differenceInDays } from "date-fns"
+import { format, differenceInDays } from "date-fns"
 import { Link } from "react-router-dom"
+import { useAuth } from "@/contexts/auth"
 
 export default function PBDMonitoringPage() {
+  const { user } = useAuth()
   const [samples, setSamples] = useState<Sample[]>([])
+  const [stageDatesBySampleId, setStageDatesBySampleId] = useState<Record<string, {
+    target_xfty: string | null
+    psi_sent_date: string | null
+    actual_send_date: string | null
+    pkg_eta_denver: string | null
+  }>>({})
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
@@ -28,32 +36,108 @@ export default function PBDMonitoringPage() {
   const [upcomingSearchTerm, setUpcomingSearchTerm] = useState("")
   const [upcomingBrandFilter, setUpcomingBrandFilter] = useState("all")
   const [upcomingStageFilter, setUpcomingStageFilter] = useState("all")
+  const [upcomingDateSort, setUpcomingDateSort] = useState<"asc" | "desc">("asc")
 
   // Filter states for Shipped tab
   const [shippedSearchTerm, setShippedSearchTerm] = useState("")
   const [shippedBrandFilter, setShippedBrandFilter] = useState("all")
   const [shippedStatusFilter, setShippedStatusFilter] = useState("all")
+  const [shippedDateSort, setShippedDateSort] = useState<"asc" | "desc">("desc")
+
+  const loadSamples = useCallback(async () => {
+    try {
+      const list = await listSamples()
+      setSamples(list || [])
+    } catch (e) {
+      console.error("Failed to load samples:", e)
+      setError("Failed to load samples. Please try again.")
+    } finally {
+      setLoading(false)
+    }
+  }, [])
 
   useEffect(() => {
-    async function loadSamples() {
-      try {
-        const list = await listSamples()
-        setSamples(list || [])
-      } catch (e) {
-        console.error("Failed to load samples:", e)
-        setError("Failed to load samples. Please try again.")
-      } finally {
-        setLoading(false)
-      }
-    }
     loadSamples()
-  }, [])
+  }, [loadSamples])
+
+  useEffect(() => {
+    async function loadXfactoryTargets() {
+      if (!user?.id || samples.length === 0) {
+        setStageDatesBySampleId({})
+        return
+      }
+
+      const owned = samples.filter((sample) => {
+        const assignment = Array.isArray(sample.team_assignment)
+          ? (sample.team_assignment[0] ?? null)
+          : (sample.team_assignment ?? null)
+        return assignment?.pbd_user_id === user.id
+      })
+
+      if (owned.length === 0) {
+        setStageDatesBySampleId({})
+        return
+      }
+
+      const entries = await Promise.all(
+        owned.map(async (sample) => {
+          try {
+            const full = await getSampleFull(sample.id)
+            const psi = (full.stages?.psi as { sent_date?: string | null } | null)
+            const dev = (full.stages?.sample_development as { target_xfty?: string | null; actual_send?: string | null } | null)
+            const ship = (full.stages?.shipment_to_brand as { pkg_eta_denver?: string | null } | null)
+
+            return [
+              sample.id,
+              {
+                target_xfty: dev?.target_xfty ?? null,
+                psi_sent_date: psi?.sent_date ?? null,
+                actual_send_date: dev?.actual_send ?? null,
+                pkg_eta_denver: ship?.pkg_eta_denver ?? null,
+              },
+            ] as const
+          } catch {
+            return [
+              sample.id,
+              {
+                target_xfty: null,
+                psi_sent_date: null,
+                actual_send_date: null,
+                pkg_eta_denver: null,
+              },
+            ] as const
+          }
+        })
+      )
+
+      setStageDatesBySampleId(Object.fromEntries(entries))
+    }
+
+    void loadXfactoryTargets()
+  }, [samples, user?.id])
+
+  useEffect(() => {
+    const onHeaderRefresh = () => {
+      setLoading(true)
+      setError(null)
+      loadSamples()
+    }
+    window.addEventListener("monitoring:refresh", onHeaderRefresh)
+    return () => window.removeEventListener("monitoring:refresh", onHeaderRefresh)
+  }, [loadSamples])
 
   const categorizedSamples = useMemo(() => {
     const now = new Date()
+    const pbdOwnedSamples = samples.filter((sample) => {
+      if (!user?.id) return false
+      const assignment = Array.isArray(sample.team_assignment)
+        ? (sample.team_assignment[0] ?? null)
+        : (sample.team_assignment ?? null)
+      return assignment?.pbd_user_id === user.id
+    })
     
     // Filter out delivered/dropped samples for monitoring
-    const activeSamples = samples.filter((sample) => {
+    const activeSamples = pbdOwnedSamples.filter((sample) => {
       const status = String(sample.current_status || "").trim().toLowerCase()
       return !status.includes("deliver") && !status.includes("drop")
     })
@@ -85,7 +169,7 @@ export default function PBDMonitoringPage() {
     })
 
     // 3. Samples Shipped (delivered status)
-    const shipped = samples.filter((sample) => {
+    const shipped = pbdOwnedSamples.filter((sample) => {
       const status = String(sample.current_status || "").trim().toLowerCase()
       return status.includes("deliver")
     })
@@ -95,7 +179,7 @@ export default function PBDMonitoringPage() {
       inDevelopment,
       shipped,
     }
-  }, [samples])
+  }, [samples, user?.id])
 
   // Extract unique values for filters
   const filterOptions = useMemo(() => {
@@ -103,7 +187,15 @@ export default function PBDMonitoringPage() {
     const stages = new Set<string>()
     const statuses = new Set<string>()
 
-    samples.forEach((sample) => {
+    const owned = samples.filter((sample) => {
+      if (!user?.id) return false
+      const assignment = Array.isArray(sample.team_assignment)
+        ? (sample.team_assignment[0] ?? null)
+        : (sample.team_assignment ?? null)
+      return assignment?.pbd_user_id === user.id
+    })
+
+    owned.forEach((sample) => {
       if (sample.brands?.name) brands.add(sample.brands.name)
       if (sample.current_stage) stages.add(sample.current_stage)
       if (sample.current_status) statuses.add(sample.current_status)
@@ -114,7 +206,7 @@ export default function PBDMonitoringPage() {
       stages: Array.from(stages).sort(),
       statuses: Array.from(statuses).sort(),
     }
-  }, [samples])
+  }, [samples, user?.id])
 
   // Apply filters to categorized samples
   const filteredSamples = useMemo(() => {
@@ -181,6 +273,79 @@ export default function PBDMonitoringPage() {
     shippedStatusFilter,
   ])
 
+  const styleStatsById = useMemo(() => {
+    const computeStats = (list: Sample[]) => {
+      const counts = new Map<string, number>()
+      const sums = new Map<string, number>()
+      for (const sample of list) {
+        const key = `${sample.style_number || "-"}__${sample.style_name || "-"}`
+        counts.set(key, (counts.get(key) ?? 0) + 1)
+        sums.set(key, (sums.get(key) ?? 0) + Number(sample.qty ?? 0))
+      }
+
+      const byId = new Map<string, { count: number; sumQty: number }>()
+      for (const sample of list) {
+        const key = `${sample.style_number || "-"}__${sample.style_name || "-"}`
+        byId.set(sample.id, {
+          count: counts.get(key) ?? 0,
+          sumQty: sums.get(key) ?? 0,
+        })
+      }
+      return byId
+    }
+
+    return {
+      inDevelopment: computeStats(filteredSamples.inDevelopment),
+      shipped: computeStats(filteredSamples.shipped),
+    }
+  }, [filteredSamples.inDevelopment, filteredSamples.shipped])
+
+  const sortedUpcomingSamples = useMemo(() => {
+    const list = [...filteredSamples.inDevelopment]
+    list.sort((a, b) => {
+      const aTime = a.sample_due_denver ? new Date(a.sample_due_denver).getTime() : Number.POSITIVE_INFINITY
+      const bTime = b.sample_due_denver ? new Date(b.sample_due_denver).getTime() : Number.POSITIVE_INFINITY
+      return upcomingDateSort === "asc" ? aTime - bTime : bTime - aTime
+    })
+    return list
+  }, [filteredSamples.inDevelopment, upcomingDateSort])
+
+  const sortedShippedSamples = useMemo(() => {
+    const list = [...filteredSamples.shipped]
+    list.sort((a, b) => {
+      const aTime = a.sample_due_denver ? new Date(a.sample_due_denver).getTime() : Number.POSITIVE_INFINITY
+      const bTime = b.sample_due_denver ? new Date(b.sample_due_denver).getTime() : Number.POSITIVE_INFINITY
+      return shippedDateSort === "asc" ? aTime - bTime : bTime - aTime
+    })
+    return list
+  }, [filteredSamples.shipped, shippedDateSort])
+
+  const upcomingTotals = useMemo(() => {
+    const styleSet = new Set<string>()
+    let totalQty = 0
+    for (const sample of filteredSamples.inDevelopment) {
+      styleSet.add(`${sample.style_number || "-"}__${sample.style_name || "-"}`)
+      totalQty += Number(sample.qty ?? 0)
+    }
+    return {
+      totalStyleCount: styleSet.size,
+      totalQty,
+    }
+  }, [filteredSamples.inDevelopment])
+
+  const shippedTotals = useMemo(() => {
+    const styleSet = new Set<string>()
+    let totalQty = 0
+    for (const sample of filteredSamples.shipped) {
+      styleSet.add(`${sample.style_number || "-"}__${sample.style_name || "-"}`)
+      totalQty += Number(sample.qty ?? 0)
+    }
+    return {
+      totalStyleCount: styleSet.size,
+      totalQty,
+    }
+  }, [filteredSamples.shipped])
+
   if (loading) {
     return (
       <div className="p-6">
@@ -191,16 +356,6 @@ export default function PBDMonitoringPage() {
 
   return (
     <div className="space-y-6 p-6 bg-background">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight text-foreground">PBD Monitoring</h1>
-          <p className="text-sm text-muted-foreground">Track sample shipment status and plan upcoming deliveries.</p>
-        </div>
-        <Button variant="outline" onClick={() => window.location.reload()}>
-          Refresh
-        </Button>
-      </div>
-
       {error && (
         <div className="rounded-lg border border-destructive/50 bg-destructive/10 px-4 py-3 text-destructive">
           {error}
@@ -288,6 +443,10 @@ export default function PBDMonitoringPage() {
               </CardDescription>
             </CardHeader>
             <CardContent>
+              <div className="mb-4 flex flex-wrap items-center gap-2 text-sm">
+                <Badge variant="secondary">Total Count Style Name: {upcomingTotals.totalStyleCount}</Badge>
+                <Badge variant="outline">Total Sum QTY: {upcomingTotals.totalQty}</Badge>
+              </div>
               {/* Filters */}
               <div className="flex flex-wrap gap-3 mb-4">
                 <div className="relative flex-1 min-w-[200px]">
@@ -440,6 +599,10 @@ export default function PBDMonitoringPage() {
               </CardDescription>
             </CardHeader>
             <CardContent>
+              <div className="mb-4 flex flex-wrap items-center gap-2 text-sm">
+                <Badge variant="secondary">Total Count Style Name: {upcomingTotals.totalStyleCount}</Badge>
+                <Badge variant="outline">Total Sum QTY: {upcomingTotals.totalQty}</Badge>
+              </div>
               {/* Filters */}
               <div className="flex flex-wrap gap-3 mb-4">
                 <div className="relative flex-1 min-w-[200px]">
@@ -503,7 +666,7 @@ export default function PBDMonitoringPage() {
                 )}
               </div>
 
-              {filteredSamples.inDevelopment.length === 0 ? (
+              {sortedUpcomingSamples.length === 0 ? (
                 <div className="text-sm text-muted-foreground py-8 text-center">
                   <Clock className="h-12 w-12 mx-auto mb-3 text-muted-foreground/50" />
                   <p>{categorizedSamples.inDevelopment.length === 0 ? "No samples in development." : "No samples match your filters."}</p>
@@ -513,58 +676,52 @@ export default function PBDMonitoringPage() {
                   <Table>
                     <TableHeader>
                       <TableRow>
-                        <TableHead>Style #</TableHead>
-                        <TableHead>Style Name</TableHead>
-                        <TableHead>Brand</TableHead>
-                        <TableHead>Current Stage</TableHead>
-                        <TableHead>Status</TableHead>
-                        <TableHead>Due Date</TableHead>
-                        <TableHead className="text-center">Days Until Due</TableHead>
-                        <TableHead className="text-right">Action</TableHead>
+                        <TableHead>FTY Target Sample Xfactory Date</TableHead>
+                        <TableHead>
+                          <button
+                            type="button"
+                            className="inline-flex items-center gap-1 text-left"
+                            onClick={() => setUpcomingDateSort((prev) => (prev === "asc" ? "desc" : "asc"))}
+                          >
+                            Sample Due in Denver Office
+                            <ArrowUpDown className="h-3.5 w-3.5" />
+                          </button>
+                        </TableHead>
+                        <TableHead>Season / Brand</TableHead>
+                        <TableHead>Style# / Name</TableHead>
+                        <TableHead>Sample Type</TableHead>
+                        <TableHead className="text-center">Count of Style Name</TableHead>
+                        <TableHead className="text-center">Sum of QTY</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {filteredSamples.inDevelopment.map((sample) => {
+                      {sortedUpcomingSamples.map((sample) => {
                         const dueDate = sample.sample_due_denver ? new Date(sample.sample_due_denver) : null
-                        const daysUntilDue = dueDate ? differenceInDays(dueDate, new Date()) : null
+                        const styleStats = styleStatsById.inDevelopment.get(sample.id)
+                        const targetXfactory = stageDatesBySampleId[sample.id]?.target_xfty
+                        const seasonLabel = sample.seasons
+                          ? `${sample.seasons.code || sample.seasons.name || "-"} ${sample.seasons.year || ""}`.trim()
+                          : "-"
+                        const brandLabel = sample.brands?.name || "-"
 
                         return (
                           <TableRow key={sample.id}>
-                            <TableCell className="font-medium">{sample.style_number}</TableCell>
-                            <TableCell>{sample.style_name || "—"}</TableCell>
-                            <TableCell>{sample.brands?.name || "—"}</TableCell>
                             <TableCell>
-                              <Badge variant="outline">{sample.current_stage || "No stage"}</Badge>
+                              {targetXfactory ? format(new Date(targetXfactory), "MMM dd, yyyy") : "—"}
                             </TableCell>
                             <TableCell>
-                              <Badge variant="secondary">{sample.current_status || "—"}</Badge>
+                              {dueDate ? format(dueDate, "MMM dd, yyyy") : "—"}
                             </TableCell>
                             <TableCell>
-                              {dueDate ? (
-                                format(dueDate, "MMM dd, yyyy")
-                              ) : (
-                                <span className="text-muted-foreground">—</span>
-                              )}
+                              {seasonLabel} / {brandLabel}
+                            </TableCell>
+                            <TableCell className="font-medium">{sample.style_number || "—"} / {sample.style_name || "—"}</TableCell>
+                            <TableCell>{sample.sample_type || "—"}</TableCell>
+                            <TableCell className="text-center">
+                              {styleStats?.count ?? 0}
                             </TableCell>
                             <TableCell className="text-center">
-                              {daysUntilDue !== null ? (
-                                <Badge
-                                  variant={daysUntilDue <= 7 ? "default" : "secondary"}
-                                  className={daysUntilDue <= 7 ? "bg-amber-500 hover:bg-amber-600" : ""}
-                                >
-                                  {daysUntilDue} days
-                                </Badge>
-                              ) : (
-                                <span className="text-muted-foreground">—</span>
-                              )}
-                            </TableCell>
-                            <TableCell className="text-right">
-                              <Link
-                                to={`/samples/${sample.id}`}
-                                className={cn(buttonVariants({ variant: "ghost", size: "sm" }))}
-                              >
-                                <ExternalLink className="h-4 w-4" />
-                              </Link>
+                              {styleStats?.sumQty ?? 0}
                             </TableCell>
                           </TableRow>
                         )
@@ -592,6 +749,10 @@ export default function PBDMonitoringPage() {
               </CardDescription>
             </CardHeader>
             <CardContent>
+              <div className="mb-4 flex flex-wrap items-center gap-2 text-sm">
+                <Badge variant="secondary">Total Count Style Name: {shippedTotals.totalStyleCount}</Badge>
+                <Badge variant="outline">Total Sum QTY: {shippedTotals.totalQty}</Badge>
+              </div>
               {/* Filters */}
               <div className="flex flex-wrap gap-3 mb-4">
                 <div className="relative flex-1 min-w-[200px]">
@@ -655,7 +816,7 @@ export default function PBDMonitoringPage() {
                 )}
               </div>
 
-              {filteredSamples.shipped.length === 0 ? (
+              {sortedShippedSamples.length === 0 ? (
                 <div className="text-sm text-muted-foreground py-8 text-center">
                   <CheckCircle2 className="h-12 w-12 mx-auto mb-3 text-muted-foreground/50" />
                   <p>{categorizedSamples.shipped.length === 0 ? "No shipped samples." : "No samples match your filters."}</p>
@@ -665,43 +826,61 @@ export default function PBDMonitoringPage() {
                   <Table>
                     <TableHeader>
                       <TableRow>
-                        <TableHead>Style #</TableHead>
-                        <TableHead>Style Name</TableHead>
-                        <TableHead>Brand</TableHead>
-                        <TableHead>Status</TableHead>
-                        <TableHead>Delivered Date</TableHead>
-                        <TableHead className="text-right">Action</TableHead>
+                        <TableHead>PSI → FTY Date</TableHead>
+                        <TableHead>Actual Send</TableHead>
+                        <TableHead>ETA to M88</TableHead>
+                        <TableHead>
+                          <button
+                            type="button"
+                            className="inline-flex items-center gap-1 text-left"
+                            onClick={() => setShippedDateSort((prev) => (prev === "asc" ? "desc" : "asc"))}
+                          >
+                            Sample Due in Denver Office
+                            <ArrowUpDown className="h-3.5 w-3.5" />
+                          </button>
+                        </TableHead>
+                        <TableHead>Season / Brand</TableHead>
+                        <TableHead>Style# / Name</TableHead>
+                        <TableHead>Sample Type</TableHead>
+                        <TableHead className="text-center">Count of Style Name</TableHead>
+                        <TableHead className="text-center">Sum of QTY</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {filteredSamples.shipped.map((sample) => (
+                      {sortedShippedSamples.map((sample) => {
+                        const dueDate = sample.sample_due_denver ? new Date(sample.sample_due_denver) : null
+                        const styleStats = styleStatsById.shipped.get(sample.id)
+                        const psiSentDate = stageDatesBySampleId[sample.id]?.psi_sent_date
+                        const actualSendDate = stageDatesBySampleId[sample.id]?.actual_send_date
+                        const pkgEtaDate = stageDatesBySampleId[sample.id]?.pkg_eta_denver
+                        const seasonLabel = sample.seasons
+                          ? `${sample.seasons.code || sample.seasons.name || "-"} ${sample.seasons.year || ""}`.trim()
+                          : "-"
+                        const brandLabel = sample.brands?.name || "-"
+
+                        return (
                         <TableRow key={sample.id}>
-                          <TableCell className="font-medium">{sample.style_number}</TableCell>
-                          <TableCell>{sample.style_name || "—"}</TableCell>
-                          <TableCell>{sample.brands?.name || "—"}</TableCell>
                           <TableCell>
-                            <Badge variant="default" className="bg-green-600 hover:bg-green-700">
-                              {sample.current_status || "Delivered"}
-                            </Badge>
+                            {psiSentDate ? format(new Date(psiSentDate), "MMM dd, yyyy") : "—"}
                           </TableCell>
                           <TableCell>
-                            <div className="flex flex-col">
-                              <span className="text-sm">{format(new Date(sample.updated_at), "MMM dd, yyyy")}</span>
-                              <span className="text-xs text-muted-foreground">
-                                {formatDistanceToNow(new Date(sample.updated_at), { addSuffix: true })}
-                              </span>
-                            </div>
+                            {actualSendDate ? format(new Date(actualSendDate), "MMM dd, yyyy") : "—"}
                           </TableCell>
-                          <TableCell className="text-right">
-                            <Link
-                              to={`/samples/${sample.id}`}
-                              className={cn(buttonVariants({ variant: "ghost", size: "sm" }))}
-                            >
-                              <ExternalLink className="h-4 w-4" />
-                            </Link>
+                          <TableCell>
+                            {pkgEtaDate ? format(new Date(pkgEtaDate), "MMM dd, yyyy") : "—"}
                           </TableCell>
+                          <TableCell>
+                            {dueDate ? format(dueDate, "MMM dd, yyyy") : "—"}
+                          </TableCell>
+                          <TableCell>
+                            {seasonLabel} / {brandLabel}
+                          </TableCell>
+                          <TableCell className="font-medium">{sample.style_number || "—"} / {sample.style_name || "—"}</TableCell>
+                          <TableCell>{sample.sample_type || "—"}</TableCell>
+                          <TableCell className="text-center">{styleStats?.count ?? 0}</TableCell>
+                          <TableCell className="text-center">{styleStats?.sumQty ?? 0}</TableCell>
                         </TableRow>
-                      ))}
+                      )})}
                     </TableBody>
                   </Table>
                 </div>

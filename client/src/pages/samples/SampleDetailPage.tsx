@@ -2,7 +2,6 @@ import { useEffect, useState } from "react"
 import { useParams, useNavigate, Link } from "react-router-dom"
 import {
   Edit,
-  ChevronDown,
   FileEdit,
   CircleDot,
   ClipboardList,
@@ -13,16 +12,14 @@ import {
   PackageCheck,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
-  DialogDescription,
-  DialogFooter,
 } from "@/components/ui/dialog"
 import {
   Tabs,
@@ -40,7 +37,7 @@ import {
   BreadcrumbSeparator,
 } from "@/components/ui/breadcrumb"
 import { STAGES } from "@/lib/constants"
-import { getSampleFull, updateSample } from "@/api/samples"
+import { getSampleFull } from "@/api/samples"
 import type { SampleFull, StageData } from "@/types/sample"
 import { useAuth } from "@/contexts/auth"
 import { canEditSample, stageForRole } from "@/lib/rbac"
@@ -56,8 +53,6 @@ import {
 } from "@/components/ui/table"
 import { cn } from "@/lib/utils"
 import { getStatusColor } from "@/lib/statusColors"
-import { fetchShipmentByTracking, type ShipmentLookupResult } from "@/api/shipping"
-import { updateStage } from "@/api/stages"
 import ActivityLogs from "@/components/activity/ActivityLogs"
 
 const stageSteps = [
@@ -68,56 +63,6 @@ const stageSteps = [
   { key: STAGES.SHIPMENT_TO_BRAND, label: "SHIP", name: "Brand Delivery Tracking", icon: Truck },
   { key: STAGES.DELIVERED_CONFIRMATION, label: "DLV", name: "Delivered Confirmation", icon: PackageCheck },
 ] as const
-
-type StepKey = (typeof stageSteps)[number]["key"]
-
-const STAGE_FIELD_LABELS: Record<string, string> = {
-  sample_due_denver: "Due (Denver)",
-  sample_sent_brand_date: "Sent to brand",
-  sample_status: "Status",
-  kickoff_date: "Kickoff date",
-  reference_m88_dev: "Reference M88 Dev",
-  reference_ship_to_fty: "Reference ship to FTY",
-  additional_notes: "Additional notes",
-  awb_to_brand: "AWB to brand",
-  unfree_status: "Unfree status",
-  owner_id: "Owner",
-  estimated_arrival: "Estimated arrival",
-  actual_arrival: "Actual arrival",
-  fty_md2: "FTY MD2",
-  fty_md_user_id: "Factory Merchandiser (FTY MD)",
-  td_to_md_comment: "TD to MD comment",
-  td_fit_log_review_status: "TD Fit Log Review Status",
-  modified_by_log: "Modified by (log)",
-  tp_handoff_td: "Date TP Hand-off to TD",
-  p3_remake_reason: "P3+ Sample Reason / Remake Reason",
-  team_member_user_id: "Costing Team Member",
-  pkg_eta_denver: "Package ETA in Denver",
-  sent_status: "Costing Sent to Brand Status",
-  cost_sheet_date: "Cost Sheet Entered Date",
-}
-
-function formatStageFieldLabel(key: string): string {
-  return STAGE_FIELD_LABELS[key] ?? key.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())
-}
-
-function formatStageFieldValue(key: string, value: unknown): string {
-  if (value == null || value === "") return "-"
-  if (key === "modified_by_log" && Array.isArray(value)) return `${value.length} entry(ies)`
-  if (key === "is_checked") return value === true || value === "true" ? "Yes (Verified)" : "No (Unverified)"
-  if (typeof value === "boolean") return value ? "Yes" : "No"
-  if (typeof value === "string" && /^\d{4}-\d{2}-\d{2}/.test(value)) {
-    return new Date(value).toLocaleDateString(undefined, { dateStyle: "medium" })
-  }
-  return String(value)
-}
-
-function hasStageFieldValue(value: unknown): boolean {
-  if (value == null) return false
-  if (typeof value === "string") return value.trim().length > 0
-  if (Array.isArray(value)) return value.length > 0
-  return true
-}
 
 function currentStageIndex(stage: string | null | undefined): number {
   if (!stage) return 0
@@ -248,19 +193,35 @@ function protoEfficiency(sampleType: string | null | undefined, hasReject: boole
   return hasReject ? "Round 2+" : "Round 1"
 }
 
+function humanizeFieldKey(key: string): string {
+  return key
+    .replace(/_/g, " ")
+    .replace(/\b\w/g, (c) => c.toUpperCase())
+}
+
+function formatStageFieldValue(value: unknown): string {
+  if (value == null) return "-"
+  if (typeof value === "boolean") return value ? "True" : "False"
+  if (typeof value === "number") return String(value)
+  if (typeof value === "string") return value.trim() ? value : "-"
+  return JSON.stringify(value, null, 2)
+}
+
+function isFilledStageField(value: unknown): boolean {
+  if (value == null) return false
+  if (typeof value === "string") return value.trim().length > 0
+  if (Array.isArray(value)) return value.length > 0
+  if (typeof value === "object") return Object.keys(value as Record<string, unknown>).length > 0
+  return true
+}
+
 export default function SampleDetailPage() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
   const { user } = useAuth()
   const [sample, setSample] = useState<SampleFull | null>(null)
   const [loading, setLoading] = useState(true)
-  const [selectedMilestone, setSelectedMilestone] = useState<StepKey | null>(null)
-  const [shipmentTrackerOpen, setShipmentTrackerOpen] = useState(false)
-  const [shipmentSaving, setShipmentSaving] = useState(false)
-  const [trackingInput, setTrackingInput] = useState("")
-  const [shipmentFetching, setShipmentFetching] = useState(false)
-  const [shipmentLookup, setShipmentLookup] = useState<ShipmentLookupResult | null>(null)
-  const [actualSampleSentDate, setActualSampleSentDate] = useState("")
+  const [selectedStageKey, setSelectedStageKey] = useState<string | null>(null)
 
   useEffect(() => {
     if (!id) return
@@ -290,6 +251,10 @@ export default function SampleDetailPage() {
     (stageForRole(user.roleCode as RoleCode) !== null ||
       user.roleCode === "ADMIN" ||
       user.roleCode === "SUPER_ADMIN")
+  const canViewAdditionalInfo =
+    user?.roleCode === "ADMIN" || user?.roleCode === "SUPER_ADMIN" || user?.roleCode === "PBD"
+  const canInspectMilestones =
+    user?.roleCode === "ADMIN" || user?.roleCode === "SUPER_ADMIN" || user?.roleCode === "PBD"
 
   if (loading) {
     return (
@@ -331,12 +296,55 @@ export default function SampleDetailPage() {
     if (names.length === 1) return names[0]
     return names[0] === names[1] ? names[0] : `${names[0]} / ${names[1]}`
   })()
+  const stageMap = sample.stages as Record<string, StageData | null | undefined>
+
+  const responsibleByStage = (stageKey: string): string => {
+    if (stageKey === STAGES.PSI) {
+      const direct = roleOwnerName("TD_PSI_INTAKE")
+      return direct !== "-" ? direct : (assignment?.td?.full_name || "-")
+    }
+    if (stageKey === STAGES.SAMPLE_DEVELOPMENT) {
+      const direct = roleOwnerName("FTY_MD_DEVELOPMENT")
+      return direct !== "-" ? direct : (assignment?.fty_md2?.full_name || "-")
+    }
+    if (stageKey === STAGES.PC_REVIEW) {
+      const direct = roleOwnerName("MD_M88_DECISION")
+      return direct !== "-" ? direct : (assignment?.md?.full_name || "-")
+    }
+    if (stageKey === STAGES.COSTING) {
+      const direct = roleOwnerName("COSTING_TEAM_COST_SHEET")
+      return direct !== "-" ? direct : (assignment?.costing?.full_name || "-")
+    }
+    if (stageKey === STAGES.SHIPMENT_TO_BRAND || stageKey === STAGES.DELIVERED_CONFIRMATION) {
+      const direct = roleOwnerName("PBD_BRAND_TRACKING")
+      return direct !== "-" ? direct : (assignment?.pbd?.full_name || "-")
+    }
+    return "-"
+  }
+
+  const selectedStageStep = stageSteps.find((s) => s.key === selectedStageKey) ?? null
+  const selectedStageData = selectedStageKey ? stageMap[selectedStageKey] ?? null : null
+  const selectedStageResponsible = selectedStageKey ? responsibleByStage(selectedStageKey) : "-"
+  const selectedStageEntries = selectedStageData
+    ? Object.entries(selectedStageData)
+      .filter(([key]) => {
+        const normalized = key.toLowerCase()
+        if (normalized === "id" || normalized.endsWith("_id")) return false
+        if (normalized === "created_at" || normalized === "updated_at") return false
+        if (normalized.includes("sample_role_owner")) return false
+        return true
+      })
+      .filter(([, value]) => isFilledStageField(value))
+      .sort(([a], [b]) => a.localeCompare(b))
+    : []
   const psi = sample.stages?.psi
   const dev = sample.stages?.sample_development
   const pc = sample.stages?.pc_review
   const costing = sample.stages?.costing
   const ship = sample.stages?.shipment_to_brand
   const scf = (sample.stages as Record<string, StageData | null | undefined>)?.scf ?? null
+  const scfSharedDate = (pc?.scf_shared_date as string | undefined) ?? (scf?.shared_date as string | undefined) ?? null
+  const scfPerformance = (scf?.performance as string | undefined) || classifyByDueDate(sample.sample_due_denver, scfSharedDate)
 
   const requestedLeadTime = sample.requested_lead_time ?? dayDiffSafe(sample.kickoff_date, sample.sample_due_denver)
   const psiSentDate = (psi?.sent_date as string | undefined) ?? null
@@ -347,63 +355,7 @@ export default function SampleDetailPage() {
   const estimateCostingDue = addDays(actualShipDate, 2)
   const estimateXfactoryForDen = requestedLeadTime != null ? subtractDays(sample.sample_due_denver, requestedLeadTime) : null
   const awbValue = (ship?.awb_number as string | undefined) || (dev?.awb as string | undefined) || ""
-  const hasShipmentData =
-    (sample.shipping?.length ?? 0) > 0 ||
-    !!awbValue ||
-    !!(ship?.sent_date as string | undefined) ||
-    !!(ship?.sample_sent_brand_date as string | undefined) ||
-    !!(ship?.awb_to_brand as string | undefined)
   const hasReject = normalizeRejectFlag(pc?.reject_status) || normalizeRejectFlag(pc?.reject_by_md)
-
-  async function saveShipmentTracker() {
-    if (!sample || !id) return
-
-    if (!actualSampleSentDate) {
-      toast.error("Actual Sample Sent to Brand date is required")
-      return
-    }
-
-    setShipmentSaving(true)
-    try {
-      await updateStage(id, STAGES.SHIPMENT_TO_BRAND, {
-        sent_date: actualSampleSentDate,
-        sample_sent_brand_date: actualSampleSentDate,
-      })
-
-      await updateSample(id, {
-        key_date: actualSampleSentDate,
-        current_stage: STAGES.DELIVERED_CONFIRMATION,
-      })
-
-      const refreshed = await getSampleFull(id)
-      setSample(refreshed)
-      setShipmentTrackerOpen(false)
-      toast.success("Marked as delivered")
-    } catch (error: unknown) {
-      const err = error as { response?: { data?: { error?: string } } }
-      toast.error(err?.response?.data?.error || "Failed to mark as delivered")
-    } finally {
-      setShipmentSaving(false)
-    }
-  }
-
-  async function fetchShipmentFromApi() {
-    if (!id) return
-    setShipmentFetching(true)
-    try {
-      const data = await fetchShipmentByTracking(id, trackingInput)
-      setShipmentLookup(data)
-      if (!trackingInput.trim() && data.awb) {
-        setTrackingInput(data.awb)
-      }
-      toast.success("Shipment fetched")
-    } catch (error: unknown) {
-      const err = error as { response?: { data?: { error?: string } } }
-      toast.error(err?.response?.data?.error || "Failed to fetch shipment")
-    } finally {
-      setShipmentFetching(false)
-    }
-  }
 
   const additionalRows: Array<{ label: string; value: string }> = [
     { label: "PBD", value: pbdRoleDisplay },
@@ -420,9 +372,9 @@ export default function SampleDetailPage() {
     { label: "PSI Discrepancy Status", value: psi?.disc_status ? "Has Discrepancy" : "No Discrepancy" },
     { label: "1st PC Reject Status MD", value: hasReject ? "Rejected" : "Not Rejected" },
     { label: "TD to MD Comment Compare", value: pc?.td_md_compare != null ? String(pc.td_md_compare) : String((pc?.review_comp ?? "").toString().trim() === (pc?.md_int_review ?? "").toString().trim()) },
-    { label: "SCF Month", value: monthShort((scf?.shared_date as string | undefined) ?? null) },
-    { label: "SCF Year", value: yearNumber((scf?.shared_date as string | undefined) ?? null) },
-    { label: "SCF Performance", value: (scf?.performance as string | undefined) || "-" },
+    { label: "SCF Month", value: monthShort(scfSharedDate) },
+    { label: "SCF Year", value: yearNumber(scfSharedDate) },
+    { label: "SCF Performance", value: scfPerformance || "-" },
     { label: "Target Xfactory Week", value: (dev?.target_xfty_wk as string | undefined) || toWeekRange(targetXfactory) },
     { label: "Estimate FTY Costing Due Date", value: estimateCostingDue || "-" },
     { label: "FTY Costing Due Date", value: dueCosting || "-" },
@@ -486,22 +438,6 @@ export default function SampleDetailPage() {
             </Breadcrumb>
           </div>
           <div className="flex items-center gap-1">
-            {hasShipmentData && canEditStage && (
-              <Button
-                variant="outline"
-                onClick={() => {
-                  setTrackingInput(awbValue || "")
-                  setShipmentLookup(null)
-                  setActualSampleSentDate(
-                    String((ship?.sample_sent_brand_date as string | undefined) || (ship?.sent_date as string | undefined) || "")
-                  )
-                  setShipmentTrackerOpen(true)
-                }}
-                size="sm"
-              >
-                Shipment Tracker
-              </Button>
-            )}
             {canEditStage && (
               <Button
                 variant="outline"
@@ -524,108 +460,6 @@ export default function SampleDetailPage() {
           <h1 className="text-xl font-bold">{sample.style_number}</h1>
         </div>
       </div>
-
-
-      <Dialog open={!!selectedMilestone} onOpenChange={(open) => !open && setSelectedMilestone(null)}>
-        <DialogContent className="max-w-md">
-          {selectedMilestone && sample && (() => {
-            const step = stageSteps.find((s) => s.key === selectedMilestone)!
-            const stageData = (sample.stages as Record<string, StageData | null | undefined>)[selectedMilestone] ?? null
-            const idx = stageSteps.findIndex((s) => s.key === selectedMilestone)
-            const isCompleted = idx < effectiveStageIdx
-            const isCurrent = idx === effectiveStageIdx
-            const statusLabel = isCompleted ? "Completed" : isCurrent ? "Current" : "Not started"
-            const skipKeys = new Set(["id", "sample_id", "created_at", "updated_at"])
-            const isIdKey = (key: string) => key === "id" || key.endsWith("_id")
-            const entries = stageData
-              ? Object.entries(stageData).filter(([k, v]) => !skipKeys.has(k) && !isIdKey(k) && hasStageFieldValue(v))
-              : []
-            return (
-              <>
-                <DialogHeader>
-                  <DialogTitle className="flex items-center gap-2">
-                    <span>{step.name}</span>
-                    <Badge variant={isCurrent ? "default" : isCompleted ? "secondary" : "outline"} className="text-xs">
-                      {statusLabel}
-                    </Badge>
-                  </DialogTitle>
-                </DialogHeader>
-                <div className="space-y-4 pt-2">
-                  <div>
-                    <div className="text-xs font-medium text-muted-foreground mb-1">Stage</div>
-                    <div className="text-sm">{step.label} — {step.name}</div>
-                  </div>
-                  {entries.length > 0 ? (
-                    <div className="space-y-2">
-                      <div className="text-xs font-medium text-muted-foreground">Details</div>
-                      <div className="rounded-lg border bg-muted/20 divide-y">
-                        {entries.map(([key, value]) => (
-                          <div key={key} className="flex justify-between gap-3 px-3 py-2 text-sm">
-                            <span className="text-muted-foreground shrink-0">{formatStageFieldLabel(key)}</span>
-                            <span className="text-right font-medium break-all">{formatStageFieldValue(key, value)}</span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-                  ) : (
-                    <p className="text-sm text-muted-foreground">No details recorded yet for this stage.</p>
-                  )}
-                </div>
-              </>
-            )
-          })()}
-        </DialogContent>
-      </Dialog>
-
-      <Dialog open={shipmentTrackerOpen} onOpenChange={setShipmentTrackerOpen}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle>Shipment Tracker</DialogTitle>
-            <DialogDescription>
-              Fetch shipment details, then mark this sample as delivered.
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="space-y-2">
-            <div className="text-xs text-muted-foreground">Tracking / AWB</div>
-            <div className="flex gap-2">
-              <Input
-                value={trackingInput}
-                onChange={(e) => setTrackingInput(e.target.value)}
-                placeholder="Enter AWB or tracking"
-              />
-              <Button type="button" variant="outline" onClick={fetchShipmentFromApi} disabled={shipmentFetching}>
-                {shipmentFetching ? "Fetching..." : "Fetch"}
-              </Button>
-            </div>
-            {shipmentLookup && (
-              <div className="rounded-md border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
-                <div>AWB: <span className="font-medium text-foreground">{shipmentLookup.awb || "-"}</span></div>
-                <div>Status: <span className="font-medium text-foreground">{shipmentLookup.status || "-"}</span></div>
-                <div>Sent Date: <span className="font-medium text-foreground">{shipmentLookup.sent_date || "-"}</span></div>
-              </div>
-            )}
-          </div>
-
-          <div className="space-y-2">
-            <div className="text-xs text-muted-foreground">Actual Sample Sent to Brand</div>
-            <Input
-              type="date"
-              value={actualSampleSentDate}
-              onChange={(e) => setActualSampleSentDate(e.target.value)}
-            />
-          </div>
-
-          <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => setShipmentTrackerOpen(false)} disabled={shipmentSaving}>
-              Cancel
-            </Button>
-            <Button type="button" onClick={saveShipmentTracker} disabled={shipmentSaving}>
-              {shipmentSaving ? "Saving..." : "Mark as Delivered"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
 
       {/* Quick Status Overview */}
       <Card className="border-l-4 border-l-blue-500">
@@ -812,20 +646,8 @@ export default function SampleDetailPage() {
                 const stageData = (sample.stages as Record<string, StageData | null | undefined>)[step.key] ?? null
                 const isVerified = stageData?.is_checked === true || stageData?.is_checked === "true"
 
-                return (
-                  <button
-                    key={step.key}
-                    type="button"
-                    onClick={() => setSelectedMilestone(step.key)}
-                    className={cn(
-                      "flex items-center gap-3 md:flex-col md:items-center md:gap-1.5",
-                      "rounded-lg p-2 -m-2 text-left md:text-center",
-                      "transition-all duration-200",
-                      "hover:bg-muted/80 hover:shadow-sm hover:ring-2 hover:ring-primary/20 hover:ring-offset-2 hover:ring-offset-background",
-                      "focus:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-                    )}
-                    aria-label={`${step.name}, click for details`}
-                  >
+                const milestoneBody = (
+                  <>
                     <div className="relative z-10 flex h-6 w-6 items-center justify-center rounded-full border border-border bg-background shrink-0">
                       <div className={`h-2.5 w-2.5 rounded-full ${dotClass}`} />
                       {isVerified && (
@@ -854,8 +676,37 @@ export default function SampleDetailPage() {
                       </div>
                       <div className="text-xs text-muted-foreground">{step.name}</div>
                     </div>
-                    <ChevronDown className="h-3.5 w-3.5 text-muted-foreground shrink-0 md:mt-0.5" aria-hidden />
-                  </button>
+                  </>
+                )
+
+                if (canInspectMilestones) {
+                  return (
+                    <button
+                      key={step.key}
+                      type="button"
+                      onClick={() => setSelectedStageKey(step.key)}
+                      className={cn(
+                        "flex items-center gap-3 md:flex-col md:items-center md:gap-1.5",
+                        "rounded-lg border border-transparent p-2 -m-2 text-left md:text-center",
+                        "transition-all duration-200 hover:bg-muted/40 hover:border-border hover:-translate-y-0.5 hover:shadow-sm hover:scale-[1.01] cursor-pointer"
+                      )}
+                    >
+                      {milestoneBody}
+                    </button>
+                  )
+                }
+
+                return (
+                  <div
+                    key={step.key}
+                    className={cn(
+                      "flex items-center gap-3 md:flex-col md:items-center md:gap-1.5",
+                      "rounded-lg border border-transparent p-2 -m-2 text-left md:text-center",
+                      "transition-all duration-200 hover:bg-muted/20 hover:border-border hover:-translate-y-0.5 hover:shadow-sm"
+                    )}
+                  >
+                    {milestoneBody}
+                  </div>
                 )
               })}
             </div>
@@ -863,24 +714,71 @@ export default function SampleDetailPage() {
         </CardContent>
       </Card>
 
-      <Card>
-        <CardHeader className="pb-2">
-          <CardTitle className="text-sm">Additional Info</CardTitle>
-          <CardDescription className="text-xs">Export-aligned fields (shown once, no duplicates)</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <div className="max-h-80 overflow-y-auto pr-1">
-            <div className="grid gap-2 sm:grid-cols-2">
-              {additionalRows.map((row) => (
-                <div key={row.label} className="rounded-md border bg-muted/20 px-3 py-2">
-                  <div className="text-[11px] uppercase tracking-wide text-muted-foreground">{row.label}</div>
-                  <div className="mt-1 text-sm font-medium break-words">{row.value || "-"}</div>
+      <Dialog open={!!selectedStageKey} onOpenChange={(open) => !open && setSelectedStageKey(null)}>
+        <DialogContent className="max-w-xl max-h-[80vh] overflow-y-auto p-0">
+          <div className="space-y-4 p-4 sm:p-5">
+            <DialogHeader className="space-y-1">
+              <DialogTitle className="text-base">{selectedStageStep?.name || "Stage details"}</DialogTitle>
+              <DialogDescription className="text-xs">
+                Filled stage fields only.
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="rounded-lg border bg-muted/10">
+              <div className="flex items-start justify-between gap-4 px-3 py-2.5 text-xs sm:px-4">
+                <span className="uppercase tracking-wide text-muted-foreground">Stage</span>
+                <span className="font-medium text-right">{selectedStageStep?.name || "-"}</span>
+              </div>
+              {selectedStageResponsible !== "-" && (
+                <div className="flex items-start justify-between gap-4 border-t px-3 py-2.5 text-xs sm:px-4">
+                  <span className="uppercase tracking-wide text-muted-foreground">Responsible</span>
+                  <span className="font-medium text-right">{selectedStageResponsible}</span>
                 </div>
-              ))}
+              )}
             </div>
+
+            {selectedStageEntries.length > 0 ? (
+              <div className="rounded-lg border bg-background p-3 sm:p-4">
+                <ul className="space-y-2.5">
+                  {selectedStageEntries.map(([key, rawValue]) => (
+                    <li key={key} className="rounded-md border bg-muted/20 px-3 py-2">
+                      <span className="block text-[11px] uppercase tracking-wide text-muted-foreground">{humanizeFieldKey(key)}</span>
+                      <span className="mt-1 block text-xs font-medium break-words leading-relaxed">
+                        {formatStageFieldValue(rawValue)}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            ) : (
+              <div className="rounded-lg border bg-muted/20 px-4 py-3 text-xs text-muted-foreground">
+                No filled fields yet for this stage.
+              </div>
+            )}
           </div>
-        </CardContent>
-      </Card>
+        </DialogContent>
+      </Dialog>
+
+      {canViewAdditionalInfo && (
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm">Additional Info</CardTitle>
+            <CardDescription className="text-xs">Export-aligned fields (shown once, no duplicates)</CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="max-h-80 overflow-y-auto pr-1">
+              <div className="grid gap-2 sm:grid-cols-2">
+                {additionalRows.map((row) => (
+                  <div key={row.label} className="rounded-md border bg-muted/20 px-3 py-2">
+                    <div className="text-[11px] uppercase tracking-wide text-muted-foreground">{row.label}</div>
+                    <div className="mt-1 text-sm font-medium break-words">{row.value || "-"}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Tabs for Shipping, Status Transitions, and Activity Logs */}
       <Tabs defaultValue="activity" className="w-full">
@@ -940,9 +838,10 @@ export default function SampleDetailPage() {
                   <Table>
                     <TableHeader>
                       <TableRow>
-                        <TableHead className="h-9">From</TableHead>
-                        <TableHead className="h-9">To</TableHead>
-                        <TableHead className="h-9">Stage</TableHead>
+                        <TableHead className="h-9">From Stage</TableHead>
+                        <TableHead className="h-9">To Stage</TableHead>
+                        <TableHead className="h-9">From Status</TableHead>
+                        <TableHead className="h-9">To Status</TableHead>
                         <TableHead className="h-9">Date</TableHead>
                         <TableHead className="h-9">Notes</TableHead>
                       </TableRow>
@@ -950,9 +849,10 @@ export default function SampleDetailPage() {
                     <TableBody>
                       {(sample.status_transitions || []).map((transition) => (
                         <TableRow key={transition.id}>
+                          <TableCell className="py-2">{transition.from_stage || "-"}</TableCell>
+                          <TableCell className="py-2">{transition.to_stage || transition.stage || "-"}</TableCell>
                           <TableCell className="py-2">{transition.from_status || "-"}</TableCell>
                           <TableCell className="py-2">{transition.to_status || "-"}</TableCell>
-                          <TableCell className="py-2">{transition.stage || "-"}</TableCell>
                           <TableCell className="py-2 text-xs">{new Date(transition.transitioned_at).toLocaleString()}</TableCell>
                           <TableCell className="py-2">{transition.notes || "-"}</TableCell>
                         </TableRow>

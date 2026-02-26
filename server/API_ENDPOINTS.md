@@ -29,7 +29,7 @@ Base URL: **http://localhost:5000/api**
 |--------|----------|------|---------------|-------------|
 | **GET** | `/api/samples` | Yes | — | List all sample requests in scope |
 | **GET** | `/api/samples/:id/full` | Yes | — | Get sample + all stages + assignments + audit |
-| **POST** | `/api/samples` | Yes | `style_id` (or `style_data`), `sample_type`, `sample_status`, `kickoff_date`, `sample_due_denver`, `unfree_status` | Create sample request |
+| **POST** | `/api/samples` | Yes | `style_id` (or `style_data`), `sample_type`, `sample_status`, `kickoff_date`, `sample_due_denver`, `ref_sample_to_fty` | Create sample request |
 | **PUT** | `/api/samples/:id` | Yes | `unfree_status`, `sample_status`, `current_stage`, `current_status` | Update sample request |
 
 ---

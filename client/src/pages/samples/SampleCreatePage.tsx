@@ -59,7 +59,6 @@ export default function SampleCreatePage() {
     sample_type: "",
     sample_type_group: "",
     coo: "",
-    unfree_status: "",
     kickoff_date: "",
     sample_due_denver: "",
     requested_lead_time: undefined,
@@ -141,7 +140,6 @@ export default function SampleCreatePage() {
           product_category: formData.product_category,
           coo: formData.coo,
         },
-        unfree_status: formData.unfree_status,
         sample_type: formData.sample_type,
         sample_type_group: formData.sample_type_group,
         sample_status: formData.sample_status || "Active",
@@ -237,11 +235,12 @@ export default function SampleCreatePage() {
             qty: row.qty ? Number(row.qty) : undefined,
             coo: row.coo || "",
           },
-          unfree_status: row.unfree_status || "",
           sample_type: row.sample_type || row.sampleType || "",
           sample_status: (row.sample_status || row.sampleStatus || "Active").trim() || "Active",
           kickoff_date: row.kickoff_date || "",
           sample_due_denver: row.sample_due_denver || "",
+          ref_from_m88: row.ref_from_m88 || row.refFromM88 || "No",
+          ref_sample_to_fty: row.ref_sample_to_fty || row.refSampleToFty || "No",
           current_status: (row.current_status || row.currentStatus || "Pending").trim() || "Pending",
           current_stage:
             (row.current_stage || row.currentStage || STAGES.PSI).trim() ||
@@ -489,21 +488,6 @@ export default function SampleCreatePage() {
               <h3 className="text-sm font-semibold mb-4">PBD Header Details</h3>
               <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
                 <div className="space-y-2">
-                  <Label htmlFor="unfree_status">Unfree Status</Label>
-                  <Select
-                    value={formData.unfree_status}
-                    onValueChange={(v) => setFormData({ ...formData, unfree_status: v })}
-                  >
-                    <SelectTrigger id="unfree_status">
-                      <SelectValue placeholder="Select" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="FREE">FREE</SelectItem>
-                      <SelectItem value="UNFREE">UNFREE</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
                   <Label htmlFor="kickoff_date">Kickoff Date</Label>
                   <Input
                     id="kickoff_date"
@@ -529,6 +513,21 @@ export default function SampleCreatePage() {
                     onValueChange={(v) => setFormData({ ...formData, ref_from_m88: v })}
                   >
                     <SelectTrigger id="ref_from_m88">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="Yes">Yes</SelectItem>
+                      <SelectItem value="No">No</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="ref_sample_to_fty">Reference Sample to ship to FTY (Y/N)</Label>
+                  <Select
+                    value={formData.ref_sample_to_fty}
+                    onValueChange={(v) => setFormData({ ...formData, ref_sample_to_fty: v })}
+                  >
+                    <SelectTrigger id="ref_sample_to_fty">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>

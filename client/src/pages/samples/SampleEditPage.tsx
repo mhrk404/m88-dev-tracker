@@ -32,7 +32,7 @@ import {
 } from "@/components/ui/alert-dialog"
 import { STAGES } from "@/lib/constants"
 import { canEditSample } from "@/lib/rbac"
-import { getSample, updateSample } from "@/api/samples"
+import { getSample, updateSample, heartbeatSamplePresence, releaseSamplePresence } from "@/api/samples"
 import { getLookups } from "@/api/lookups"
 import type { Sample, UpdateSampleInput } from "@/types/sample"
 import type { Lookups } from "@/types/lookups"
@@ -112,6 +112,39 @@ export default function SampleEditPage() {
     }
     loadData()
   }, [id, navigate])
+
+  useEffect(() => {
+    if (!id || !user) return
+    const sampleId = id
+    let active = true
+
+    async function beat() {
+      try {
+        await heartbeatSamplePresence(sampleId, {
+          context: "sample_edit",
+          lock_type: "sample_edit",
+        })
+      } catch (error: unknown) {
+        if (!active) return
+        const err = error as { response?: { status?: number; data?: { error?: string } } }
+        if (err.response?.status === 409) {
+          toast.error(err.response?.data?.error || "Sample is currently being edited by another user")
+          navigate(`/samples/${sampleId}`)
+        }
+      }
+    }
+
+    void beat()
+    const intervalId = window.setInterval(() => {
+      void beat()
+    }, 10000)
+
+    return () => {
+      active = false
+      window.clearInterval(intervalId)
+      void releaseSamplePresence(sampleId, { context: "sample_edit" })
+    }
+  }, [id, user, navigate])
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -200,9 +233,6 @@ export default function SampleEditPage() {
     let remaining = DELAY
     let cancelled = false
 
-    let intervalId: ReturnType<typeof setInterval>
-    let timeoutId: ReturnType<typeof setTimeout>
-
     function cancel() {
       cancelled = true
       clearInterval(intervalId)
@@ -216,7 +246,7 @@ export default function SampleEditPage() {
       duration: Infinity,
     })
 
-    intervalId = setInterval(() => {
+    const intervalId: ReturnType<typeof setInterval> = setInterval(() => {
       remaining--
       if (remaining > 0) {
         toast.loading(`Saving in ${remaining}s — click Undo to cancel`, {
@@ -227,7 +257,7 @@ export default function SampleEditPage() {
       }
     }, 1000)
 
-    timeoutId = setTimeout(async () => {
+    const timeoutId: ReturnType<typeof setTimeout> = setTimeout(async () => {
       clearInterval(intervalId)
       if (cancelled) return
       toast.dismiss(toastId)

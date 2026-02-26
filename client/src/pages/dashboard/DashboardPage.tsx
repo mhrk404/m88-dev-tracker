@@ -103,8 +103,12 @@ export default function DashboardPage() {
   const delayPercentage = submissionTotal > 0
     ? Math.round((stats.submission.delay / submissionTotal) * 100)
     : 0
+  const earlyPercentage = submissionTotal > 0
+    ? Math.round((stats.submission.early / submissionTotal) * 100)
+    : 0
   const onTimeTrend = onTimePercentage >= 70 ? "up" : "down"
   const delayTrend = delayPercentage <= 20 ? "down" : "up"
+  const earlyTrend = earlyPercentage >= 10 ? "up" : "down"
 
   const now = new Date()
   const dueSoon7 = new Date(now)
@@ -781,7 +785,7 @@ export default function DashboardPage() {
       {/* ADMIN Dashboard */}
       {isAdmin && (
         <>
-          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+          <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
             <Card>
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
                 <CardTitle className="text-sm font-medium text-muted-foreground">Total Samples</CardTitle>
@@ -837,6 +841,27 @@ export default function DashboardPage() {
               {delayTrend === "down" ? "Down from last period" : "Up this period"}
             </p>
             <p className="text-xs text-muted-foreground">Delayed submissions count</p>
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-3">
+            <CardTitle className="text-sm font-medium text-muted-foreground">Early Submissions</CardTitle>
+            <TrendingUp className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent className="space-y-2">
+            <div className="flex items-center justify-between">
+              <div className="text-3xl font-bold text-foreground">{stats.submission.early.toLocaleString()}</div>
+              <div className={cn(
+                "flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium",
+                earlyTrend === "up" ? "bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400" : "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400"
+              )}>
+                {earlyTrend === "up" ? <ArrowUp className="h-3 w-3" /> : <ArrowDown className="h-3 w-3" />}
+                {earlyPercentage}%
+              </div>
+            </div>
+            <p className="text-xs text-muted-foreground">Early delivery count</p>
+            <p className="text-xs text-muted-foreground">Delivered before due date</p>
           </CardContent>
         </Card>
 

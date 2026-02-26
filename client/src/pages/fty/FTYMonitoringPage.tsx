@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo } from "react"
+import { useEffect, useState, useMemo, useCallback } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button, buttonVariants } from "@/components/ui/button"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -27,20 +27,31 @@ export default function FTYMonitoringPage() {
   const [upcomingSearchTerm, setUpcomingSearchTerm] = useState("")
   const [upcomingBrandFilter, setUpcomingBrandFilter] = useState("all")
 
-  useEffect(() => {
-    async function loadSamples() {
-      try {
-        const list = await listSamples()
-        setSamples(list || [])
-      } catch (e) {
-        console.error("Failed to load samples:", e)
-        setError("Failed to load samples. Please try again.")
-      } finally {
-        setLoading(false)
-      }
+  const loadSamples = useCallback(async () => {
+    try {
+      const list = await listSamples()
+      setSamples(list || [])
+    } catch (e) {
+      console.error("Failed to load samples:", e)
+      setError("Failed to load samples. Please try again.")
+    } finally {
+      setLoading(false)
     }
-    loadSamples()
   }, [])
+
+  useEffect(() => {
+    loadSamples()
+  }, [loadSamples])
+
+  useEffect(() => {
+    const onHeaderRefresh = () => {
+      setLoading(true)
+      setError(null)
+      loadSamples()
+    }
+    window.addEventListener("monitoring:refresh", onHeaderRefresh)
+    return () => window.removeEventListener("monitoring:refresh", onHeaderRefresh)
+  }, [loadSamples])
 
   const categorizedSamples = useMemo(() => {
     const activeSamples = samples.filter((sample) => {
@@ -134,9 +145,6 @@ export default function FTYMonitoringPage() {
           <h1 className="text-2xl font-semibold tracking-tight text-foreground">Factory Monitoring</h1>
           <p className="text-sm text-muted-foreground">Track samples in development and upcoming production.</p>
         </div>
-        <Button variant="outline" onClick={() => window.location.reload()}>
-          Refresh
-        </Button>
       </div>
 
       {error && (

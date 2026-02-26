@@ -1,6 +1,23 @@
 import apiClient from "./client"
 import type { Sample, SampleFull, CreateSampleInput, UpdateSampleInput, SampleFilters } from "@/types/sample"
 
+export type SamplePresenceContext = "view" | "sample_list" | "sample_edit" | "stage_edit"
+export type SamplePresenceLockType = "sample_edit" | "stage_edit"
+
+export interface SamplePresenceUser {
+  user_id: number
+  username: string | null
+  full_name: string | null
+  role_code: string | null
+  context: SamplePresenceContext
+  lock_type: SamplePresenceLockType | null
+  last_seen_at: string
+}
+
+export interface SamplePresenceResponse {
+  by_sample: Record<string, SamplePresenceUser[]>
+}
+
 export async function listSamples(filters?: SampleFilters): Promise<Sample[]> {
   const params = new URLSearchParams()
   if (filters?.season_id) params.append("season_id", String(filters.season_id))
@@ -37,4 +54,25 @@ export async function updateSample(sampleId: string, input: UpdateSampleInput): 
 
 export async function deleteSample(sampleId: string): Promise<void> {
   await apiClient.delete(`/samples/${sampleId}`)
+}
+
+export async function getSamplesPresence(sampleIds: string[]): Promise<SamplePresenceResponse> {
+  if (sampleIds.length === 0) return { by_sample: {} }
+  const query = encodeURIComponent(sampleIds.join(","))
+  const { data } = await apiClient.get<SamplePresenceResponse>(`/samples/presence?sample_ids=${query}`)
+  return data
+}
+
+export async function heartbeatSamplePresence(
+  sampleId: string,
+  input: { context: SamplePresenceContext; lock_type?: SamplePresenceLockType }
+): Promise<void> {
+  await apiClient.post(`/samples/${sampleId}/presence/heartbeat`, input)
+}
+
+export async function releaseSamplePresence(
+  sampleId: string,
+  input?: { context?: SamplePresenceContext }
+): Promise<void> {
+  await apiClient.post(`/samples/${sampleId}/presence/release`, input ?? {})
 }

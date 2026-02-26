@@ -30,8 +30,9 @@ export default function ActivityLogs({ sampleId }: ActivityLogsProps) {
         const data = await getSampleHistory(sampleId)
         setHistory(data.sample_history || [])
         setTransitions(data.status_transitions || [])
-      } catch (err: any) {
-        setError(err.message || "Failed to load activity history")
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : "Failed to load activity history"
+        setError(message)
       } finally {
         setLoading(false)
       }
@@ -74,9 +75,10 @@ export default function ActivityLogs({ sampleId }: ActivityLogsProps) {
                 <TableHeader>
                   <TableRow>
                     <TableHead className="h-9 text-xs">Date/Time</TableHead>
+                    <TableHead className="h-9 text-xs">From Stage</TableHead>
+                    <TableHead className="h-9 text-xs">To Stage</TableHead>
                     <TableHead className="h-9 text-xs">From Status</TableHead>
                     <TableHead className="h-9 text-xs">To Status</TableHead>
-                    <TableHead className="h-9 text-xs">Stage</TableHead>
                     <TableHead className="h-9 text-xs">Changed By</TableHead>
                     <TableHead className="h-9 text-xs">Notes</TableHead>
                   </TableRow>
@@ -89,6 +91,16 @@ export default function ActivityLogs({ sampleId }: ActivityLogsProps) {
                       </TableCell>
                       <TableCell className="py-2">
                         <Badge variant="outline" className="text-xs">
+                          {transition.from_stage || "-"}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="py-2">
+                        <Badge variant="secondary" className="text-xs">
+                          {transition.to_stage || "-"}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="py-2">
+                        <Badge variant="outline" className="text-xs">
                           {transition.from_status || "-"}
                         </Badge>
                       </TableCell>
@@ -97,7 +109,6 @@ export default function ActivityLogs({ sampleId }: ActivityLogsProps) {
                           {transition.to_status || "-"}
                         </Badge>
                       </TableCell>
-                      <TableCell className="py-2">{transition.to_stage || "-"}</TableCell>
                       <TableCell className="py-2">
                         {transition.users?.full_name || transition.users?.username || "-"}
                       </TableCell>

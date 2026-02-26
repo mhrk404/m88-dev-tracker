@@ -26,12 +26,11 @@ export const STAGE_FIELDS: Record<StageName, StageFieldConfig[]> = {
     // Setup
     { key: "fty_md_user_id", label: "Factory Merchandiser (FTY MD)", type: "user_select", optional: true, section: "Setup" },
     { key: "fty_machine", label: "Factory Machine / Line Used", type: "text", optional: true, section: "Setup" },
-    { key: "fty_target_sample", label: "Factory Target Date to Complete Sample", type: "date", optional: true, section: "Setup" },
     { key: "target_xfty", label: "Target Ex-Factory (XFTY) Date", type: "date", optional: true, section: "Setup" },
     // Status
     { key: "sample_proceeded", label: "Factory Development Proceeded", type: "date", optional: true, section: "Status" },
-    { key: "fty_remark", label: "Factory Remarks / Updates (Include Date)", type: "text", optional: true, section: "Status" },
     { key: "fty_psi_btp_discrepancy", label: "Factory PSI vs BTP Discrepancy Details", type: "text", optional: true, section: "Status" },
+    { key: "fty_remark", label: "Factory Remarks / Updates (Include Date)", type: "textarea", optional: true, section: "Status" },
     // Shipping
     { key: "actual_send", label: "Actual Date Sample Sent", type: "date", optional: true, section: "Shipping" },
     { key: "awb", label: "Dispatch AWB Number", type: "text", optional: true, section: "Shipping" },
@@ -63,7 +62,6 @@ export const STAGE_FIELDS: Record<StageName, StageFieldConfig[]> = {
       optional: true,
       options: ["Okay", "Conditionally Okay", "Dropped", "Rejected"],
     },
-    { key: "td_fit_log_review_status", label: "TD Fit Log Review Status", type: "text", optional: true },
     { key: "scf_shared_date", label: "Date SCF Was Shared", type: "date", optional: true },
   ],
   [STAGES.COSTING]: [
@@ -78,12 +76,13 @@ export const STAGE_FIELDS: Record<StageName, StageFieldConfig[]> = {
     { key: "cost_sheet_date", label: "Date Cost Sheet Was Entered", type: "date", optional: true },
   ],
   [STAGES.SHIPMENT_TO_BRAND]: [
-    { key: "sent_date", label: "Date Package Was Sent to Brand", type: "date", optional: true },
     { key: "awb_number", label: "Package AWB Number", type: "text", optional: true },
     { key: "pkg_eta_denver", label: "Package ETA in Denver", type: "date", optional: true },
     { key: "is_checked", label: "Mark Brand Delivery Stage as Checked / Verified", type: "boolean", optional: true },
   ],
-  [STAGES.DELIVERED_CONFIRMATION]: [],
+  [STAGES.DELIVERED_CONFIRMATION]: [
+    { key: "sent_date", label: "Date Package Was Sent to Brand", type: "date", optional: true },
+  ],
 }
 
 export function getStageFields(stage: StageName): StageFieldConfig[] {
@@ -98,7 +97,7 @@ export function stagePayloadFromForm(
   const out: Record<string, unknown> = {}
   for (const f of fields) {
     if (formValues[f.key] !== undefined && formValues[f.key] !== "") {
-      let v = formValues[f.key]
+      const v = formValues[f.key]
       if (f.type === "number" && v !== "") out[f.key] = Number(v)
       else if (f.type === "user_select" && v !== "") out[f.key] = Number(v)
       else if (f.type === "boolean") {

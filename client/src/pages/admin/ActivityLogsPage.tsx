@@ -1,8 +1,11 @@
 import { useEffect, useState } from "react"
-import { Loader2, Activity } from "lucide-react"
+import { Loader2, SlidersHorizontal } from "lucide-react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Select, SelectTrigger, SelectContent, SelectItem, SelectValue } from "@/components/ui/select"
+import { Button } from "@/components/ui/button"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { Label } from "@/components/ui/label"
 import PageBreadcrumbs from "@/components/layout/PageBreadcrumbs"
 import RoleGate from "@/components/protected/RoleGate"
 import {
@@ -42,13 +45,18 @@ export default function ActivityLogsPage() {
   const [dateEnd, setDateEnd] = useState("")
   const [sortBy, setSortBy] = useState("timestamp")
   const [sortDir, setSortDir] = useState("desc")
+  const [filterOpen, setFilterOpen] = useState(false)
+
+  useEffect(() => {
+    setCurrentPage(1)
+  }, [searchFilter, actionFilter, resourceFilter, userIdFilter, dateStart, dateEnd, sortBy, sortDir])
 
   useEffect(() => {
     async function loadLogs() {
       try {
         setLoading(true)
         const offset = (currentPage - 1) * PAGE_SIZE
-        const params: any = {
+        const params: Record<string, string | number> = {
           limit: PAGE_SIZE,
           offset,
           sortBy,
@@ -62,8 +70,9 @@ export default function ActivityLogsPage() {
         const data = await getAllActivityLogs(params)
         setLogs(data.logs || [])
         setTotal(data.total || 0)
-      } catch (err: any) {
-        setError(err.message || "Failed to load activity logs")
+      } catch (err: unknown) {
+        const message = err instanceof Error ? err.message : "Failed to load activity logs"
+        setError(message)
       } finally {
         setLoading(false)
       }
@@ -83,6 +92,39 @@ export default function ActivityLogsPage() {
 
   const totalPages = Math.ceil(total / PAGE_SIZE)
 
+  const hasActiveFilters =
+    searchFilter.trim().length > 0 ||
+    actionFilter.trim().length > 0 ||
+    resourceFilter.trim().length > 0 ||
+    userIdFilter.trim().length > 0 ||
+    dateStart.length > 0 ||
+    dateEnd.length > 0 ||
+    sortBy !== "timestamp" ||
+    sortDir !== "desc"
+
+  function clearAllFilters() {
+    setSearchFilter("")
+    setActionFilter("")
+    setResourceFilter("")
+    setUserIdFilter("")
+    setDateStart("")
+    setDateEnd("")
+    setSortBy("timestamp")
+    setSortDir("desc")
+    setCurrentPage(1)
+  }
+
+  function resetPanelFilters() {
+    setActionFilter("")
+    setResourceFilter("")
+    setUserIdFilter("")
+    setDateStart("")
+    setDateEnd("")
+    setSortBy("timestamp")
+    setSortDir("desc")
+    setCurrentPage(1)
+  }
+
   const getActionColor = (action: string) => {
     if (action.includes("login")) return "bg-blue-500/20 text-blue-700 dark:text-blue-400"
     if (action.includes("create") || action === "insert") return "bg-green-500/20 text-green-700 dark:text-green-400"
@@ -96,81 +138,137 @@ export default function ActivityLogsPage() {
       <div className="space-y-4 p-4">
         <PageBreadcrumbs />
 
-        <div className="flex flex-col gap-4">
-          <div className="flex items-center gap-3">
-            <Activity className="h-6 w-6 text-muted-foreground" />
-            <div>
-              <h1 className="text-2xl font-semibold">Activity Logs</h1>
-              <p className="text-sm text-muted-foreground">System-wide audit trail of all user actions and events</p>
-            </div>
-          </div>
-        </div>
-
         <Card>
           <CardHeader>
             <CardTitle className="text-base">Filter & Sort Activity</CardTitle>
-            <CardDescription className="text-xs">Filter by action, resource, user, date. Sort by column.</CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="flex flex-wrap gap-2 items-center">
-              <Input
-                placeholder="Search (local)"
-                value={searchFilter}
-                onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSearchFilter(e.target.value)}
-                className="w-40"
-              />
-              <Input
-                placeholder="Action"
-                value={actionFilter}
-                onChange={e => setActionFilter(e.target.value)}
-                className="w-32"
-              />
-              <Input
-                placeholder="Resource"
-                value={resourceFilter}
-                onChange={e => setResourceFilter(e.target.value)}
-                className="w-32"
-              />
-              <Input
-                placeholder="User ID"
-                value={userIdFilter}
-                onChange={e => setUserIdFilter(e.target.value)}
-                className="w-24"
-              />
-              <Input
-                type="date"
-                value={dateStart}
-                onChange={e => setDateStart(e.target.value)}
-                className="w-36"
-                title="Start date"
-              />
-              <Input
-                type="date"
-                value={dateEnd}
-                onChange={e => setDateEnd(e.target.value)}
-                className="w-36"
-                title="End date"
-              />
-              <Select value={sortBy} onValueChange={setSortBy}>
-                <SelectTrigger className="w-32">
-                  <SelectValue placeholder="Sort by" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="timestamp">Date/Time</SelectItem>
-                  <SelectItem value="action">Action</SelectItem>
-                  <SelectItem value="resource">Resource</SelectItem>
-                  <SelectItem value="user_id">User ID</SelectItem>
-                </SelectContent>
-              </Select>
-              <Select value={sortDir} onValueChange={setSortDir}>
-                <SelectTrigger className="w-24">
-                  <SelectValue placeholder="Sort direction" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="desc">Descending</SelectItem>
-                  <SelectItem value="asc">Ascending</SelectItem>
-                </SelectContent>
-              </Select>
+            <div className="border-b pb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex items-center gap-3">
+                <Input
+                  placeholder="Search action, resource, details..."
+                  value={searchFilter}
+                  onChange={(e: React.ChangeEvent<HTMLInputElement>) => setSearchFilter(e.target.value)}
+                  className="h-9 w-full sm:w-[320px]"
+                />
+                <div className="text-sm text-muted-foreground">
+                  {hasActiveFilters ? "Filters applied" : "No active filters"}
+                </div>
+              </div>
+              <div className="flex items-center gap-2">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={clearAllFilters}
+                  disabled={!hasActiveFilters}
+                  className="h-9"
+                >
+                  Clear filters
+                </Button>
+                <Popover open={filterOpen} onOpenChange={setFilterOpen}>
+                  <PopoverTrigger asChild>
+                    <Button type="button" variant="outline" size="sm" className="h-9">
+                      <SlidersHorizontal className="h-4 w-4" />
+                      Filter
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent align="end" className="w-[360px] p-0">
+                    <div className="border-b px-4 py-3">
+                      <h3 className="text-sm font-semibold">Filter</h3>
+                    </div>
+
+                    <div className="space-y-4 p-4">
+                      <div className="space-y-2">
+                        <Label className="text-sm">Action</Label>
+                        <Input
+                          placeholder="Action"
+                          value={actionFilter}
+                          onChange={(e) => setActionFilter(e.target.value)}
+                          className="h-9"
+                        />
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label className="text-sm">Resource</Label>
+                        <Input
+                          placeholder="Resource"
+                          value={resourceFilter}
+                          onChange={(e) => setResourceFilter(e.target.value)}
+                          className="h-9"
+                        />
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label className="text-sm">User ID</Label>
+                        <Input
+                          placeholder="User ID"
+                          value={userIdFilter}
+                          onChange={(e) => setUserIdFilter(e.target.value)}
+                          className="h-9"
+                        />
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label className="text-sm">Start date</Label>
+                        <Input
+                          type="date"
+                          value={dateStart}
+                          onChange={(e) => setDateStart(e.target.value)}
+                          className="h-9"
+                        />
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label className="text-sm">End date</Label>
+                        <Input
+                          type="date"
+                          value={dateEnd}
+                          onChange={(e) => setDateEnd(e.target.value)}
+                          className="h-9"
+                        />
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label className="text-sm">Sort by</Label>
+                        <Select value={sortBy} onValueChange={setSortBy}>
+                          <SelectTrigger className="h-9 w-full">
+                            <SelectValue placeholder="Sort by" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="timestamp">Date/Time</SelectItem>
+                            <SelectItem value="action">Action</SelectItem>
+                            <SelectItem value="resource">Resource</SelectItem>
+                            <SelectItem value="user_id">User ID</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label className="text-sm">Sort direction</Label>
+                        <Select value={sortDir} onValueChange={setSortDir}>
+                          <SelectTrigger className="h-9 w-full">
+                            <SelectValue placeholder="Sort direction" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="desc">Descending</SelectItem>
+                            <SelectItem value="asc">Ascending</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center justify-between border-t px-4 py-3">
+                      <Button type="button" variant="outline" size="sm" onClick={resetPanelFilters}>
+                        Reset all
+                      </Button>
+                      <Button type="button" size="sm" onClick={() => setFilterOpen(false)}>
+                        Done
+                      </Button>
+                    </div>
+                  </PopoverContent>
+                </Popover>
+              </div>
             </div>
           </CardContent>
         </Card>

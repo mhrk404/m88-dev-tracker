@@ -9,8 +9,11 @@ const router = express.Router({ mergeParams: true });
 
 router.use(authenticate);
 router.get('/', requireSampleRead, ctrl.list);
+router.get('/presence', requireSampleRead, ctrl.listPresence);
 router.get('/:sampleId/full', requireSampleRead, ctrl.getFull);
 router.get('/:sampleId/shipment', requireSampleRead, ctrl.getShipment);
+router.post('/:sampleId/presence/heartbeat', requireSampleRead, ctrl.heartbeatPresence);
+router.post('/:sampleId/presence/release', requireSampleRead, ctrl.releasePresence);
 router.get('/:sampleId', requireSampleRead, ctrl.getOne);
 router.post('/', requireSampleCreate, ctrl.create);
 router.put('/:sampleId', requireSampleUpdate, ctrl.update);

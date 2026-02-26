@@ -1,9 +1,10 @@
 import { useEffect, useMemo, useState, Fragment } from "react"
-import { Plus, Pencil, Trash2 } from "lucide-react"
+import { Plus, Pencil, Trash2, X } from "lucide-react"
 import { TableSkeleton } from "@/components/ui/skeletons"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
+import { Checkbox } from "@/components/ui/checkbox"
 import {
   Table,
   TableBody,
@@ -65,6 +66,19 @@ import type {
 } from "@/types/lookups"
 
 type LookupKind = "brands" | "seasons" | "divisions" | "product_categories" | "sample_types" | "roles"
+type LookupRow = Brand | Season | Division | ProductCategory | SampleType | Role
+
+function getErrorMessage(error: unknown, fallback: string): string {
+  if (
+    error &&
+    typeof error === "object" &&
+    "response" in error
+  ) {
+    const response = (error as { response?: { data?: { error?: string } } }).response
+    return response?.data?.error || fallback
+  }
+  return fallback
+}
 
 export default function LookupsPage() {
   useAuth()
@@ -81,6 +95,7 @@ export default function LookupsPage() {
 
   const [search, setSearch] = useState("")
   const [currentPage, setCurrentPage] = useState(1)
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
   const pageSize = 10
 
   const [dialogOpen, setDialogOpen] = useState(false)
@@ -121,7 +136,7 @@ export default function LookupsPage() {
     refresh()
   }, [])
 
-  const items = useMemo(() => {
+  const items = useMemo<LookupRow[]>(() => {
     const q = search.trim().toLowerCase()
     const filterByName = <T extends { name: string }>(rows: T[]): T[] =>
       !q ? rows : rows.filter((r) => r.name.toLowerCase().includes(q))
@@ -174,6 +189,76 @@ export default function LookupsPage() {
     setCurrentPage(1)
   }, [search, kind])
 
+  useEffect(() => {
+    setSelectedIds(new Set())
+  }, [kind])
+
+  useEffect(() => {
+    setSelectedIds((prev) => {
+      if (prev.size === 0) return prev
+      const validIds = new Set(items.map((row) => Number(row.id)))
+      const next = new Set(Array.from(prev).filter((id) => validIds.has(id)))
+      return next.size === prev.size ? prev : next
+    })
+  }, [items])
+
+  function toggleSelectOne(id: number) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  function toggleSelectAllOnPage(checked: boolean | "indeterminate") {
+    setSelectedIds((prev) => {
+      const next = new Set(prev)
+      const pageIds = paginatedItems.map((row) => Number(row.id))
+      if (checked === true) {
+        pageIds.forEach((id) => next.add(id))
+      } else {
+        pageIds.forEach((id) => next.delete(id))
+      }
+      return next
+    })
+  }
+
+  async function deleteById(id: number) {
+    if (kind === "brands") {
+      await deleteBrand(id)
+    } else if (kind === "seasons") {
+      await deleteSeason(id)
+    } else if (kind === "divisions") {
+      await deleteDivision(id)
+    } else if (kind === "product_categories") {
+      await deleteProductCategory(id)
+    } else if (kind === "sample_types") {
+      await deleteSampleType(id)
+    } else if (kind === "roles") {
+      await deleteRole(id)
+    }
+  }
+
+  async function handleDeleteSelected() {
+    if (selectedIds.size === 0) return
+    const count = selectedIds.size
+    if (!window.confirm(`Delete ${count} selected ${titleMap[kind].toLowerCase()}?`)) return
+
+    try {
+      setSaving(true)
+      await Promise.all(Array.from(selectedIds).map((id) => deleteById(id)))
+      toast.success(`Deleted ${count} item${count > 1 ? "s" : ""}`)
+      setSelectedIds(new Set())
+      await refresh()
+    } catch (err: unknown) {
+      console.error("Bulk delete lookup failed:", err)
+      toast.error(getErrorMessage(err, "Failed to delete selected items"))
+    } finally {
+      setSaving(false)
+    }
+  }
+
   function openCreate() {
     setEditingId(null)
     setName("")
@@ -185,7 +270,7 @@ export default function LookupsPage() {
     setDialogOpen(true)
   }
 
-  function openEdit(row: any) {
+  function openEdit(row: LookupRow) {
     setEditingId(row.id)
     setName(kind === "seasons" ? "" : row.name ?? "")
     setYear(kind === "seasons" ? row.year ?? "" : "")
@@ -278,35 +363,23 @@ export default function LookupsPage() {
       toast.success(editingId ? "Updated successfully" : "Created successfully")
       setDialogOpen(false)
       await refresh()
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error("Save lookup failed:", err)
-      toast.error(err?.response?.data?.error || "Failed to save")
+      toast.error(getErrorMessage(err, "Failed to save"))
     } finally {
       setSaving(false)
     }
   }
 
-  async function handleDelete(row: any) {
+  async function handleDelete(row: LookupRow) {
     if (!window.confirm("Delete this item?")) return
     try {
-      if (kind === "brands") {
-        await deleteBrand(row.id)
-      } else if (kind === "seasons") {
-        await deleteSeason(row.id)
-      } else if (kind === "divisions") {
-        await deleteDivision(row.id)
-      } else if (kind === "product_categories") {
-        await deleteProductCategory(row.id)
-      } else if (kind === "sample_types") {
-        await deleteSampleType(row.id)
-      } else if (kind === "roles") {
-        await deleteRole(row.id)
-      }
+      await deleteById(row.id)
       toast.success("Deleted")
       await refresh()
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error("Delete lookup failed:", err)
-      toast.error(err?.response?.data?.error || "Failed to delete")
+      toast.error(getErrorMessage(err, "Failed to delete"))
     }
   }
 
@@ -318,6 +391,10 @@ export default function LookupsPage() {
     sample_types: "Sample Types",
     roles: "Roles",
   }
+
+  const allPageSelected =
+    paginatedItems.length > 0 &&
+    paginatedItems.every((row) => selectedIds.has(Number(row.id)))
 
   if (loading) {
     return (
@@ -388,6 +465,36 @@ export default function LookupsPage() {
               </Button>
             </div>
 
+            {selectedIds.size > 0 && (
+              <div className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-destructive/30 bg-destructive/5 p-2.5">
+                <div className="text-sm">
+                  <span className="font-medium">{selectedIds.size}</span> selected
+                </div>
+                <div className="flex items-center gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="border-destructive/50 text-destructive hover:bg-destructive/10"
+                    onClick={handleDeleteSelected}
+                    disabled={saving}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                    Delete Selected
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-xs"
+                    onClick={() => setSelectedIds(new Set())}
+                    disabled={saving}
+                  >
+                    <X className="h-4 w-4" />
+                  </Button>
+                </div>
+              </div>
+            )}
+
             {items.length === 0 ? (
               <div className="py-10 text-center text-sm text-muted-foreground">
                 No {titleMap[kind].toLowerCase()} found.
@@ -396,6 +503,12 @@ export default function LookupsPage() {
               <Table>
                 <TableHeader>
                   <TableRow>
+                    <TableHead className="w-[48px]">
+                      <Checkbox
+                        checked={allPageSelected}
+                        onCheckedChange={toggleSelectAllOnPage}
+                      />
+                    </TableHead>
                     <TableHead className="w-[72px]">ID</TableHead>
                     <TableHead>Name</TableHead>
                     {kind === "seasons" && (
@@ -411,8 +524,14 @@ export default function LookupsPage() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {paginatedItems.map((row: any) => (
+                  {paginatedItems.map((row) => (
                     <TableRow key={row.id}>
+                      <TableCell onClick={(e) => e.stopPropagation()}>
+                        <Checkbox
+                          checked={selectedIds.has(Number(row.id))}
+                          onCheckedChange={() => toggleSelectOne(Number(row.id))}
+                        />
+                      </TableCell>
                       <TableCell className="text-xs text-muted-foreground">{row.id}</TableCell>
                       <TableCell>{kind === 'seasons' ? row.code : row.name}</TableCell>
                       {kind === "seasons" && (

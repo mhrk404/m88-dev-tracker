@@ -1,11 +1,11 @@
 import { supabase } from '../config/supabase.js';
 import { logAudit, auditMeta } from '../services/auditService.js';
-import { canAccessRegion, isAdmin, isSuperAdmin, normalizeRegion, isValidRegion } from '../utils/regionScope.js';
+import { canAccessRegion, isSuperAdmin, normalizeRegion, isValidRegion } from '../utils/regionScope.js';
 
 const USER_SELECT = 'id, username, email, full_name, department, region, role_id, is_active, created_at, updated_at';
 
 function requesterRegion(req) {
-  return normalizeRegion(req.user?.region) || 'US';
+  return normalizeRegion(req.user?.region);
 }
 
 async function getUserById(id) {
@@ -45,8 +45,13 @@ function canAssignRole(req, assignedRoleCode) {
 export const list = async (req, res) => {
   try {
     let query = supabase.from('users').select(`${USER_SELECT}, roles(code, name)`).order('username');
-    // Note: For admins, we return all users but frontend will filter admin visibility by region
-    // This allows admins to see non-admin users from all regions for sample workflow
+    if (!isSuperAdmin(req)) {
+      const actorRegion = requesterRegion(req);
+      if (!actorRegion) {
+        return res.status(403).json({ error: 'Your account has no region scope. Please re-login or contact super admin.' });
+      }
+      query = query.eq('region', actorRegion);
+    }
     const { data, error } = await query;
     if (error) throw error;
     const list = (data ?? []).map((u) => ({ ...u, roleCode: u.roles?.code, roleName: u.roles?.name, roles: undefined }));
@@ -78,12 +83,17 @@ export const create = async (req, res) => {
     if (!username?.trim()) return res.status(400).json({ error: 'username is required' });
     if (!email?.trim()) return res.status(400).json({ error: 'email is required' });
 
-    const normalizedRegion = normalizeRegion(region) || requesterRegion(req);
+    const actorRegion = requesterRegion(req);
+    if (!isSuperAdmin(req) && !actorRegion) {
+      return res.status(403).json({ error: 'Your account has no region scope. Please re-login or contact super admin.' });
+    }
+
+    const normalizedRegion = isSuperAdmin(req)
+      ? (normalizeRegion(region) || actorRegion || 'US')
+      : actorRegion;
+
     if (!isValidRegion(normalizedRegion)) {
       return res.status(400).json({ error: 'region must be one of: US, PH, INDONESIA' });
-    }
-    if (!isSuperAdmin(req) && !canAccessRegion(req, normalizedRegion)) {
-      return res.status(403).json({ error: 'You can only create users within your region' });
     }
 
     let assignedRoleCode = null;
@@ -136,6 +146,11 @@ export const update = async (req, res) => {
     const existing = await ensureRegionAccess(req, id) || await getUserById(id);
     if (!existing) return res.status(404).json({ error: 'User not found' });
 
+    const actorRegion = requesterRegion(req);
+    if (!isSuperAdmin(req) && !actorRegion) {
+      return res.status(403).json({ error: 'Your account has no region scope. Please re-login or contact super admin.' });
+    }
+
     const { username, email, full_name, department, role_id, region, is_active } = req.body;
     const updates = {};
     if (username !== undefined) updates.username = username.trim();
@@ -147,7 +162,7 @@ export const update = async (req, res) => {
       if (!normalizedRegion || !isValidRegion(normalizedRegion)) {
         return res.status(400).json({ error: 'region must be one of: US, PH, INDONESIA' });
       }
-      if (!isSuperAdmin(req) && !canAccessRegion(req, normalizedRegion)) {
+      if (!isSuperAdmin(req) && normalizedRegion !== actorRegion) {
         return res.status(403).json({ error: 'You can only move users within your region' });
       }
       updates.region = normalizedRegion;

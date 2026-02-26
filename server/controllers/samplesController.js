@@ -2,6 +2,14 @@ import { supabase } from '../config/supabase.js';
 import { logAudit, auditMeta } from '../services/auditService.js';
 import { STAGE_TABLES, getStagesForRole } from '../middleware/rbac.js';
 import { SAMPLE_ROLE_KEYS, getSampleRoleOwners, setSampleRoleOwner } from '../services/sampleRoleOwnersService.js';
+import {
+  upsertSamplePresence,
+  releaseSamplePresence,
+  listActiveSamplePresence,
+  findConflictingSampleLock,
+  normalizeContext,
+  normalizeLockType,
+} from '../services/samplePresenceService.js';
 
 /** sample_request with style and team_assignment. */
 const SAMPLE_REQUEST_SELECT = `
@@ -58,6 +66,16 @@ function flattenSample(s) {
 
 const flattenList = (list) => (list || []).map(flattenSample);
 
+async function getPresenceUserProfile(userId) {
+  const { data, error } = await supabase
+    .from('users')
+    .select('id, username, full_name')
+    .eq('id', Number(userId))
+    .maybeSingle();
+  if (error) throw error;
+  return data;
+}
+
 function assignmentRoleOwnerUpdates(sampleId, assignment, fallbackPbdUserId = null) {
   return [
     {
@@ -105,6 +123,27 @@ function normalizeStage(stage) {
   return typeof stage === 'string' ? stage.trim().toLowerCase() : null;
 }
 
+function toAuditStage(stageLike) {
+  const normalized = normalizeStage(stageLike);
+  switch (normalized) {
+    case 'psi':
+      return 'PSI';
+    case 'sample_development':
+      return 'SAMPLE_DEVELOPMENT';
+    case 'pc_review':
+      return 'PC_REVIEW';
+    case 'costing':
+      return 'COSTING';
+    case 'scf':
+      return 'SCF';
+    case 'shipment_to_brand':
+    case 'delivered_confirmation':
+      return 'SHIPMENT_TO_BRAND';
+    default:
+      return 'PSI';
+  }
+}
+
 function isCanceledLike(value) {
   if (value == null) return false;
   const normalized = String(value).trim().toLowerCase();
@@ -137,13 +176,49 @@ function canViewSampleForRole(roleCode, currentStage) {
   return allowedStages.includes(stage);
 }
 
+const FULL_HISTORY_ROLES = new Set(['ADMIN', 'SUPER_ADMIN', 'PBD']);
+
+const ROLE_HISTORY_SCOPE = {
+  TD: ['psi'],
+  FTY: ['sample_development'],
+  MD: ['pc_review'],
+  COSTING: ['costing'],
+  BRAND: ['shipment_to_brand', 'delivered_confirmation'],
+};
+
+function normalizeHistoryStage(value) {
+  if (value == null) return null;
+  return String(value).trim().toLowerCase().replace(/[\s-]+/g, '_');
+}
+
+function canSeeFullHistory(roleCode) {
+  return FULL_HISTORY_ROLES.has(String(roleCode || '').toUpperCase());
+}
+
+function isHistoryRowVisibleForRole(row, roleCode) {
+  const role = String(roleCode || '').toUpperCase();
+  if (canSeeFullHistory(role)) return true;
+
+  const allowedStages = ROLE_HISTORY_SCOPE[role] ?? [];
+  if (allowedStages.length === 0) return false;
+
+  const field = String(row?.field_changed || '').toLowerCase();
+  const candidates = [normalizeHistoryStage(row?.stage)];
+  if (field === 'current_stage') {
+    candidates.push(normalizeHistoryStage(row?.old_value));
+    candidates.push(normalizeHistoryStage(row?.new_value));
+  }
+
+  return candidates.some((stage) => !!stage && allowedStages.includes(stage));
+}
+
 /** Write a field-level change to stage_audit_log. Non-blocking. */
 async function recordHistory(sampleId, tableName, fieldName, oldValue, newValue, changedBy, notes = null) {
   try {
     await supabase.from('stage_audit_log').insert({
       sample_id: sampleId,
       user_id: changedBy,
-      stage: tableName,
+      stage: toAuditStage(tableName),
       action: 'UPDATE',
       field_changed: fieldName,
       old_value: oldValue,
@@ -160,7 +235,7 @@ async function recordTransition(sampleId, fromStatus, toStatus, stage, transitio
     await supabase.from('stage_audit_log').insert({
       sample_id: sampleId,
       user_id: transitionedBy,
-      stage: stage || 'sample_request',
+      stage: toAuditStage(stage),
       action: 'UPDATE',
       field_changed: 'status',
       old_value: fromStatus,
@@ -282,14 +357,15 @@ export const getFull = async (req, res) => {
       destination: 'Brand',
       estimated_arrival: null,
       actual_arrival: shipment.sent_date,
-      status: shipment.stage_status,
+      status: shipment.sent_date ? 'Sent' : 'Pending',
       created_at: shipment.created_at,
       updated_at: shipment.updated_at
     }] : [];
 
     // Map audit log to history format
     const auditData = audit.data ?? [];
-    const history = auditData.map(a => ({
+    const visibleAuditData = auditData.filter((row) => isHistoryRowVisibleForRole(row, req.user?.roleCode));
+    const history = visibleAuditData.map(a => ({
       id: a.log_id,
       sample_id: a.sample_id,
       table_name: a.stage,
@@ -301,14 +377,19 @@ export const getFull = async (req, res) => {
       change_notes: null
     }));
 
-    const status_transitions = auditData
-      .filter(a => a.field_changed === 'status' || a.field_changed === 'current_status' || a.field_changed === 'current_stage')
+    const status_transitions = visibleAuditData
+      .filter(a => {
+        const field = String(a.field_changed || '').toLowerCase();
+        return field === 'status' || field === 'current_status' || field === 'sample_status' || field === 'current_stage';
+      })
       .map(a => ({
         id: a.log_id,
         sample_id: a.sample_id,
-        from_status: a.field_changed === 'status' ? a.old_value : null,
-        to_status: a.new_value,
-        stage: a.stage,
+        from_status: String(a.field_changed || '').toLowerCase() === 'current_stage' ? null : a.old_value,
+        to_status: String(a.field_changed || '').toLowerCase() === 'current_stage' ? null : a.new_value,
+        from_stage: String(a.field_changed || '').toLowerCase() === 'current_stage' ? a.old_value : null,
+        to_stage: String(a.field_changed || '').toLowerCase() === 'current_stage' ? a.new_value : a.stage,
+        stage: String(a.field_changed || '').toLowerCase() === 'current_stage' ? (a.new_value || a.stage) : a.stage,
         transitioned_by: a.user_id,
         transitioned_at: a.timestamp,
         notes: null
@@ -340,7 +421,7 @@ export const getShipment = async (req, res) => {
 
     const { data: sample, error: sampleErr } = await supabase
       .from('sample_request')
-      .select('sample_id,current_stage')
+      .select('sample_id,current_stage,current_status')
       .eq('sample_id', sampleId)
       .maybeSingle();
     if (sampleErr) throw sampleErr;
@@ -369,8 +450,8 @@ export const getShipment = async (req, res) => {
     return res.json({
       id: shipment.shipment_id,
       sample_id: shipment.sample_id,
-      awb: shipment.awb_number ?? shipment.awb_to_brand ?? null,
-      status: shipment.stage_status ?? null,
+      awb: shipment.awb_number ?? null,
+      status: sample.current_status ?? null,
       sent_date: shipment.sent_date ?? null,
       data: shipment,
     });
@@ -380,12 +461,101 @@ export const getShipment = async (req, res) => {
   }
 };
 
+export const heartbeatPresence = async (req, res) => {
+  try {
+    const { sampleId } = req.params;
+    if (!sampleId || sampleId === 'undefined') {
+      return res.status(400).json({ error: 'Valid sample_id is required' });
+    }
+
+    const { data: sample, error: sampleErr } = await supabase
+      .from('sample_request')
+      .select('sample_id,current_stage')
+      .eq('sample_id', sampleId)
+      .maybeSingle();
+    if (sampleErr) throw sampleErr;
+    if (!sample) return res.status(404).json({ error: 'Sample not found' });
+    if (!canViewSampleForRole(req.user?.roleCode, sample.current_stage)) {
+      return res.status(403).json({ error: 'You can only access samples that are at your stage.' });
+    }
+
+    const profile = await getPresenceUserProfile(req.user?.id);
+    const context = normalizeContext(req.body?.context);
+    const lockType = normalizeLockType(req.body?.lock_type);
+
+    const conflict = lockType
+      ? await findConflictingSampleLock({ sampleId, userId: req.user?.id })
+      : null;
+
+    if (conflict) {
+      const blockerName = conflict.full_name || conflict.username || `User #${conflict.user_id}`;
+      return res.status(409).json({
+        error: `Locked by ${blockerName}. Please wait until they finish editing.`,
+        conflict,
+      });
+    }
+
+    const result = await upsertSamplePresence({
+      sampleId,
+      userId: req.user?.id,
+      username: profile?.username ?? req.user?.username ?? null,
+      fullName: profile?.full_name ?? null,
+      roleCode: req.user?.roleCode ?? null,
+      context,
+      lockType,
+    });
+
+    return res.json({ ok: true, sample_id: String(sampleId), expires_at: result.expires_at });
+  } catch (err) {
+    console.error('samples heartbeatPresence:', err);
+    return res.status(500).json({ error: err.message ?? 'Failed to update presence' });
+  }
+};
+
+export const releasePresence = async (req, res) => {
+  try {
+    const { sampleId } = req.params;
+    if (!sampleId || sampleId === 'undefined') {
+      return res.status(400).json({ error: 'Valid sample_id is required' });
+    }
+
+    await releaseSamplePresence({
+      sampleId,
+      userId: req.user?.id,
+      context: req.body?.context ? normalizeContext(req.body.context) : null,
+    });
+
+    return res.json({ ok: true, sample_id: String(sampleId) });
+  } catch (err) {
+    console.error('samples releasePresence:', err);
+    return res.status(500).json({ error: err.message ?? 'Failed to release presence' });
+  }
+};
+
+export const listPresence = async (req, res) => {
+  try {
+    const rawIds = String(req.query.sample_ids || '')
+      .split(',')
+      .map((v) => v.trim())
+      .filter(Boolean);
+
+    if (rawIds.length === 0) {
+      return res.json({ by_sample: {} });
+    }
+
+    const grouped = await listActiveSamplePresence(rawIds);
+    return res.json({ by_sample: grouped });
+  } catch (err) {
+    console.error('samples listPresence:', err);
+    return res.status(500).json({ error: err.message ?? 'Failed to list presence' });
+  }
+};
+
 export const create = async (req, res) => {
   try {
     const {
       style_id,
       style,
-      unfree_status,
       sample_type,
       sample_type_group,
       sample_status,
@@ -400,6 +570,8 @@ export const create = async (req, res) => {
       assignment,
     } = req.body;
     const createdBy = req.user?.id;
+    const creatorUserId = createdBy != null ? Number(createdBy) : null;
+    const creatorPbdUserId = creatorUserId;
     let resolvedStyleId = style_id;
 
     // Compute requested lead time (weeks) from dates if possible
@@ -453,7 +625,6 @@ export const create = async (req, res) => {
     const computedLead = computeLeadTimeWeeks(kickoff_date, sample_due_denver)
     const samplePayload = {
       style_id: Number(resolvedStyleId),
-      unfree_status: unfree_status?.trim() || null,
       sample_type: sample_type?.trim() || null,
       sample_type_group: sample_type_group?.trim() || null,
       sample_status: 'Active',
@@ -480,7 +651,7 @@ export const create = async (req, res) => {
     const sampleId = sampleRow.sample_id;
     const assignPayload = {
       sample_id: sampleId,
-      pbd_user_id: assignment?.pbd_user_id != null ? Number(assignment.pbd_user_id) : null,
+      pbd_user_id: assignment?.pbd_user_id != null ? Number(assignment.pbd_user_id) : creatorPbdUserId,
       td_user_id: assignment?.td_user_id != null ? Number(assignment.td_user_id) : null,
       fty_user_id: assignment?.fty_user_id != null ? Number(assignment.fty_user_id) : null,
       fty_md2_user_id: assignment?.fty_md2_user_id != null ? Number(assignment.fty_md2_user_id) : null,
@@ -497,7 +668,7 @@ export const create = async (req, res) => {
 
     await supabase.from('sample_request').update({ assignment_id: assignRow.assignment_id }).eq('sample_id', sampleId);
 
-    const roleOwnerUpdates = assignmentRoleOwnerUpdates(sampleId, assignPayload, createdBy);
+    const roleOwnerUpdates = assignmentRoleOwnerUpdates(sampleId, assignPayload, creatorPbdUserId);
     await Promise.all(roleOwnerUpdates.map((item) => setSampleRoleOwner({ ...item, enteredBy: createdBy })));
 
     const { data: dataFull, error: fetchErr } = await supabase
@@ -509,7 +680,7 @@ export const create = async (req, res) => {
 
     const { ip, userAgent } = auditMeta(req);
     await logAudit({ userId: req.user?.id, action: 'create', resource: 'sample', resourceId: sampleId, details: { sample_id: sampleId }, ip, userAgent });
-    await recordHistory(sampleId, 'sample_request', 'create', null, 'Active', createdBy, 'Sample created');
+    await recordHistory(sampleId, samplePayload.current_stage, 'create', null, 'Active', createdBy, 'Sample created');
 
     return res.status(201).json(flattenSample(dataFull));
   } catch (err) {
@@ -521,6 +692,15 @@ export const create = async (req, res) => {
 export const update = async (req, res) => {
   try {
     const { sampleId } = req.params;
+    const conflictingLock = await findConflictingSampleLock({ sampleId, userId: req.user?.id });
+    if (conflictingLock) {
+      const blockerName = conflictingLock.full_name || conflictingLock.username || `User #${conflictingLock.user_id}`;
+      return res.status(409).json({
+        error: `Sample is currently being edited by ${blockerName}. Try again in a few seconds.`,
+        conflict: conflictingLock,
+      });
+    }
+
     const allowed = [
       'unfree_status', 'sample_type', 'sample_type_group', 'sample_status', 'kickoff_date', 'sample_due_denver',
       'requested_lead_time', 'lead_time_type', 'ref_from_m88', 'ref_sample_to_fty', 'additional_notes', 'key_date',
@@ -652,14 +832,38 @@ export const update = async (req, res) => {
       const { ip, userAgent } = auditMeta(req);
       await logAudit({ userId, action: 'update', resource: 'sample', resourceId: sampleId, details: { keys: Object.keys(updates) }, ip, userAgent });
 
+      const resolvedNewStage = updates.current_stage ?? oldRow.current_stage;
+      const resolvedNewStatus = updates.current_status ?? oldRow.current_status;
+      const stageChanged = String(oldRow.current_stage ?? '') !== String(resolvedNewStage ?? '');
+      const statusChanged = String(oldRow.current_status ?? '') !== String(resolvedNewStatus ?? '');
+
+      if (stageChanged) {
+        await recordHistory(
+          sampleId,
+          String(resolvedNewStage || oldRow.current_stage || 'sample_request').toUpperCase(),
+          'current_stage',
+          oldRow.current_stage != null ? String(oldRow.current_stage) : null,
+          resolvedNewStage != null ? String(resolvedNewStage) : null,
+          userId,
+        );
+      }
+
+      if (statusChanged) {
+        await recordTransition(
+          sampleId,
+          oldRow.current_status,
+          resolvedNewStatus,
+          String(resolvedNewStage || oldRow.current_stage || 'sample_request').toUpperCase(),
+          userId,
+        );
+      }
+
       for (const key of Object.keys(updates)) {
         const oldVal = oldRow[key] != null ? String(oldRow[key]) : null;
         const newVal = updates[key] != null ? String(updates[key]) : null;
         if (oldVal !== newVal) {
-          if (key === 'current_stage' || key === 'current_status') {
-            await recordTransition(sampleId, oldRow.current_status, updates.current_status ?? oldRow.current_status, updates.current_stage ?? oldRow.current_stage, userId);
-          } else {
-            recordHistory(sampleId, 'sample_request', key, oldVal, newVal, userId);
+          if (key !== 'current_stage' && key !== 'current_status') {
+            recordHistory(sampleId, resolvedNewStage ?? oldRow.current_stage, key, oldVal, newVal, userId);
           }
         }
       }

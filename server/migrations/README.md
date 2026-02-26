@@ -12,6 +12,8 @@ Clean, authoritative migrations for **m88-dev-tracker** — rewritten to match t
 | `004_stage_tables.sql` | All 6 stage child tables | `psi`, `sample_development`, `pc_review`, `costing`, `scf`, `shipment_to_brand` |
 | `005_audit_log.sql` | Field-level change log | `stage_audit_log` |
 | `006_seed_role_permission.sql` | Permission seed data | *(seeds `role_permission`)* |
+| `023_align_stage_schema_with_ui.sql` | Align stage-table columns to active UI fields | *(alters `psi`, `sample_development`, `pc_review`, `shipment_to_brand`)* |
+| `024_update_fields_for_sample_and_stage_ui.sql` | Update create-sample/stage schema to match latest UI fields | *(alters `sample_request`, `sample_development`, `pc_review`)* |
 
 ## Apply to a Fresh Database
 

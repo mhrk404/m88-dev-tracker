@@ -106,6 +106,8 @@ export interface StatusTransition {
   sample_id: string
   from_status: string | null
   to_status: string | null
+  from_stage?: string | null
+  to_stage?: string | null
   stage: string | null
   transitioned_by: number
   transitioned_at: string

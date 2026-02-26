@@ -167,11 +167,8 @@ export default function UsersPage() {
   const filteredUsers = useMemo(() => {
     const q = search.trim().toLowerCase()
     return users.filter((u) => {
-      // STRICT region-based admin visibility: admins can only see admins from their own region
-      if (!canManageAllRegions && isAdministrativeRole(u.roleCode)) {
-        if (u.region !== currentUser?.region) {
-          return false; // Hide admins from other regions
-        }
+      if (!canManageAllRegions && u.region !== currentUser?.region) {
+        return false
       }
 
       const matchesQuery =

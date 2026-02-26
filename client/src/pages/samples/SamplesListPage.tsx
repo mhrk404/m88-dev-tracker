@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import { useNavigate } from "react-router-dom"
-import { Eye, Edit, Download, Trash2, X, ArrowRight } from "lucide-react"
+import { Eye, Edit, Trash2, X, ArrowRight, SlidersHorizontal } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card, CardContent } from "@/components/ui/card"
@@ -22,6 +22,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Badge } from "@/components/ui/badge"
 import {
   Dialog,
@@ -42,7 +43,16 @@ import {
   AlertDialogCancel,
 } from "@/components/ui/alert-dialog"
 import { Label } from "@/components/ui/label"
-import { listSamples, getSampleFull, updateSample, deleteSample } from "@/api/samples"
+import {
+  listSamples,
+  getSampleFull,
+  updateSample,
+  deleteSample,
+  getSamplesPresence,
+  heartbeatSamplePresence,
+  releaseSamplePresence,
+  type SamplePresenceUser,
+} from "@/api/samples"
 import { getLookups } from "@/api/lookups"
 import { exportSamples, type ExportFormat } from "@/api/export"
 import type { Sample, UpdateSampleInput } from "@/types/sample"
@@ -196,10 +206,13 @@ export default function SamplesListPage() {
   const [lookups, setLookups] = useState<Lookups | null>(null)
   const [loading, setLoading] = useState(true)
   const [exporting, setExporting] = useState(false)
+  const [exportOpen, setExportOpen] = useState(false)
   const [exportFormat, setExportFormat] = useState<ExportFormat>("xlsx")
   const [filters, setFilters] = useState<SampleFilters>({})
   const [searchQuery, setSearchQuery] = useState("")
   const [statusFilter, setStatusFilter] = useState<string>("all")
+  const [stageFilter, setStageFilter] = useState<string>("all")
+  const [filterOpen, setFilterOpen] = useState(false)
   const [page, setPage] = useState(1)
   const [editingSampleId, setEditingSampleId] = useState<string | null>(null)
   const [editFormData, setEditFormData] = useState<UpdateSampleInput>({})
@@ -208,6 +221,8 @@ export default function SamplesListPage() {
   const [showSaveConfirm, setShowSaveConfirm] = useState(false)
   const [editShipmentEta, setEditShipmentEta] = useState<string | null>(null)
   const [selectedSampleIds, setSelectedSampleIds] = useState<Set<string>>(new Set())
+  const [presenceBySample, setPresenceBySample] = useState<Record<string, SamplePresenceUser[]>>({})
+  const [activeListOpen, setActiveListOpen] = useState(false)
   const [sampleToDelete, setSampleToDelete] = useState<Sample | null>(null)
   const [deleteOpen, setDeleteOpen] = useState(false)
   const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false)
@@ -215,7 +230,7 @@ export default function SamplesListPage() {
 
   useEffect(() => {
     setPage(1)
-  }, [filters, searchQuery, statusFilter])
+  }, [filters, searchQuery, statusFilter, stageFilter])
 
   useEffect(() => {
     if (!editingSampleId || !lookups) return
@@ -241,6 +256,12 @@ export default function SamplesListPage() {
       .catch(() => toast.error("Failed to load sample"))
       .finally(() => setEditFormLoading(false))
   }, [editingSampleId, lookups])
+
+  useEffect(() => {
+    const onHeaderExport = () => setExportOpen(true)
+    window.addEventListener("samples:export", onHeaderExport)
+    return () => window.removeEventListener("samples:export", onHeaderExport)
+  }, [])
 
   async function refreshSamples() {
     try {
@@ -299,9 +320,6 @@ export default function SamplesListPage() {
     let remaining = DELAY
     let cancelled = false
 
-    let intervalId: ReturnType<typeof setInterval>
-    let timeoutId: ReturnType<typeof setTimeout>
-
     function cancel() {
       cancelled = true
       clearInterval(intervalId)
@@ -315,7 +333,7 @@ export default function SamplesListPage() {
       duration: Infinity,
     })
 
-    intervalId = setInterval(() => {
+    const intervalId = setInterval(() => {
       remaining--
       if (remaining > 0) {
         toast.loading(`Saving in ${remaining}s — click Undo to cancel`, {
@@ -326,7 +344,7 @@ export default function SamplesListPage() {
       }
     }, 1000)
 
-    timeoutId = setTimeout(async () => {
+    const timeoutId = setTimeout(async () => {
       clearInterval(intervalId)
       if (cancelled) return
       toast.dismiss(toastId)
@@ -369,6 +387,22 @@ export default function SamplesListPage() {
       if (s.current_status && s.current_status.trim()) set.add(simplifyStatus(s.current_status))
     }
     return Array.from(set).sort((a, b) => a.localeCompare(b))
+  }, [samples])
+
+  const availableStages = useMemo(() => {
+    const set = new Set<string>()
+    for (const sample of samples) {
+      if (sample.current_stage && sample.current_stage.trim()) set.add(sample.current_stage)
+    }
+
+    const all = Array.from(set)
+    const inOrder = STAGE_ORDER.filter((stage) => set.has(stage)).map((stage) => ({ value: stage, label: STAGE_LABELS[stage] ?? stage }))
+    const extras = all
+      .filter((stage) => !STAGE_ORDER.includes(stage))
+      .sort((a, b) => a.localeCompare(b))
+      .map((stage) => ({ value: stage, label: formatStageDisplay(stage) }))
+
+    return [...inOrder, ...extras]
   }, [samples])
 
   const editableStatuses = useMemo(() => {
@@ -422,6 +456,7 @@ export default function SamplesListPage() {
   const hasActiveFilters =
     searchQuery.trim().length > 0 ||
     statusFilter !== "all" ||
+    stageFilter !== "all" ||
     filters.season_id !== undefined ||
     filters.brand_id !== undefined ||
     !!filters.division ||
@@ -430,7 +465,15 @@ export default function SamplesListPage() {
   function clearAllFilters() {
     setSearchQuery("")
     setStatusFilter("all")
+    setStageFilter("all")
     setFilters({})
+    setPage(1)
+  }
+
+  function resetPanelFilters() {
+    setFilters({})
+    setStatusFilter("all")
+    setStageFilter("all")
     setPage(1)
   }
 
@@ -446,7 +489,11 @@ export default function SamplesListPage() {
       statusFilter === "all" ||
       simplifyStatus(sample.current_status) === statusFilter
 
-    return matchesQuery && matchesStatus
+    const matchesStage =
+      stageFilter === "all" ||
+      (sample.current_stage ?? "") === stageFilter
+
+    return matchesQuery && matchesStatus && matchesStage
   })
 
   const totalPages = Math.max(1, Math.ceil(filteredSamples.length / SAMPLES_PAGE_SIZE))
@@ -461,6 +508,8 @@ export default function SamplesListPage() {
     const start = (safePage - 1) * SAMPLES_PAGE_SIZE
     return filteredSamples.slice(start, start + SAMPLES_PAGE_SIZE)
   }, [filteredSamples, safePage])
+
+  const pagedSampleIds = useMemo(() => pagedSamples.map((sample) => sample.id), [pagedSamples])
 
   const canEdit = user ? canEditSample(user.roleCode as RoleCode) : false
   const canEditStage =
@@ -482,6 +531,103 @@ export default function SamplesListPage() {
       return next
     })
   }
+
+  useEffect(() => {
+    if (!user) return
+    let active = true
+
+    async function loadPresence() {
+      if (pagedSampleIds.length === 0) {
+        if (active) setPresenceBySample({})
+        return
+      }
+      try {
+        const data = await getSamplesPresence(pagedSampleIds)
+        if (active) setPresenceBySample(data.by_sample || {})
+      } catch {
+        if (active) setPresenceBySample({})
+      }
+    }
+
+    void loadPresence()
+    const intervalId = window.setInterval(() => {
+      void loadPresence()
+    }, 8000)
+
+    return () => {
+      active = false
+      window.clearInterval(intervalId)
+    }
+  }, [pagedSampleIds, user])
+
+  useEffect(() => {
+    if (!editingSampleId || !user) return
+    const sampleId = editingSampleId
+    let active = true
+
+    async function beat() {
+      try {
+        await heartbeatSamplePresence(sampleId, {
+          context: "sample_edit",
+          lock_type: "sample_edit",
+        })
+      } catch (err: unknown) {
+        if (!active) return
+        const status = (err as { response?: { status?: number; data?: { error?: string } } })?.response?.status
+        const message = (err as { response?: { data?: { error?: string } } })?.response?.data?.error || "Sample is currently being edited by another user"
+        if (status === 409) {
+          toast.error(message)
+          setEditingSampleId(null)
+        }
+      }
+    }
+
+    void beat()
+    const intervalId = window.setInterval(() => {
+      void beat()
+    }, 10000)
+
+    return () => {
+      active = false
+      window.clearInterval(intervalId)
+      void releaseSamplePresence(sampleId, { context: "sample_edit" })
+    }
+  }, [editingSampleId, user])
+
+  function getPresenceName(person: SamplePresenceUser): string {
+    return (person.full_name || person.username || `User #${person.user_id}`).trim()
+  }
+
+  function getInitials(name: string): string {
+    const parts = name
+      .split(" ")
+      .map((p) => p.trim())
+      .filter(Boolean)
+    if (parts.length === 0) return "?"
+    if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase()
+    return `${parts[0][0] ?? ""}${parts[1][0] ?? ""}`.toUpperCase()
+  }
+
+  const getUniqueActiveEditors = useCallback((sampleId: string): SamplePresenceUser[] => {
+    const all = presenceBySample[sampleId] ?? []
+    const locked = all.filter((p) => p.lock_type === "sample_edit" || p.lock_type === "stage_edit")
+    const byUser = new Map<number, SamplePresenceUser>()
+    locked.forEach((p) => {
+      if (!byUser.has(p.user_id)) byUser.set(p.user_id, p)
+    })
+    return Array.from(byUser.values())
+  }, [presenceBySample])
+
+  const activeSampleEntries = useMemo(() => {
+    return pagedSamples
+      .map((sample) => ({
+        sample,
+        editors: getUniqueActiveEditors(sample.id),
+      }))
+      .filter((entry) => entry.editors.length > 0)
+  }, [pagedSamples, getUniqueActiveEditors])
+
+  const visibleActiveEntries = activeSampleEntries.slice(0, 3)
 
   const toggleSelectAllOnPage = () => {
     const pageIds = pagedSamples.map((sample) => sample.id)
@@ -518,9 +664,6 @@ export default function SamplesListPage() {
     setBulkDeleteOpen(false)
     setSampleToDelete(null)
 
-    let intervalId: ReturnType<typeof setInterval>
-    let timeoutId: ReturnType<typeof setTimeout>
-
     function cancel() {
       cancelled = true
       clearInterval(intervalId)
@@ -534,7 +677,7 @@ export default function SamplesListPage() {
       duration: Infinity,
     })
 
-    intervalId = setInterval(() => {
+    const intervalId = setInterval(() => {
       remaining--
       if (remaining > 0) {
         toast.loading(`Deleting in ${remaining}s — click Undo to cancel`, {
@@ -545,7 +688,7 @@ export default function SamplesListPage() {
       }
     }, 1000)
 
-    timeoutId = setTimeout(async () => {
+    const timeoutId = setTimeout(async () => {
       clearInterval(intervalId)
       if (cancelled) return
       toast.dismiss(toastId)
@@ -560,9 +703,10 @@ export default function SamplesListPage() {
           return next
         })
         await refreshSamples()
-      } catch (err: any) {
+      } catch (err: unknown) {
         console.error("Delete sample failed:", err)
-        toast.error(err?.response?.data?.error || "Failed to delete sample(s)")
+        const msg = (err as { response?: { data?: { error?: string } } })?.response?.data?.error || "Failed to delete sample(s)"
+        toast.error(msg)
       } finally {
         setDeleting(false)
       }
@@ -597,11 +741,13 @@ export default function SamplesListPage() {
       a.remove()
       URL.revokeObjectURL(url)
       toast.success("Export started")
-    } catch (err: any) {
+    } catch (err: unknown) {
       console.error("Export samples failed:", err)
-      toast.error(err?.response?.data?.error || "Failed to export samples")
+      const msg = (err as { response?: { data?: { error?: string } } })?.response?.data?.error || "Failed to export samples"
+      toast.error(msg)
     } finally {
       setExporting(false)
+      setExportOpen(false)
     }
   }
 
@@ -615,147 +761,101 @@ export default function SamplesListPage() {
 
   return (
     <div className="space-y-6 px-6 mt-5">
-      <div className="flex items-center justify-between">
-        <div>        </div>
-        <div className="flex items-center gap-2">
-          <Select value={exportFormat} onValueChange={(value) => setExportFormat(value as ExportFormat)}>
-            <SelectTrigger className="h-9 w-[120px]">
-              <SelectValue placeholder="Format" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="xlsx">Excel (.xlsx)</SelectItem>
-              <SelectItem value="csv">CSV (.csv)</SelectItem>
-            </SelectContent>
-          </Select>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={onExport}
-            disabled={exporting}
-          >
-            <Download className="h-4 w-4" />
-            {exporting ? "Exporting..." : `Export ${exportFormat.toUpperCase()}`}
-          </Button>
-        </div>
-      </div>
-
       <Card>
         <CardContent className="pt-6">
           {/* Filters */}
-          <div className="mb-6 border-b pb-6 flex justify-between items-center gap-4">
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search by style number, name, or color..."
-              className="h-9 w-full max-w-xs rounded-md border border-input bg-background px-3 text-sm placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-ring"
-            />
-            <div className="flex flex-wrap items-center gap-2">
-              <Select value={statusFilter} onValueChange={setStatusFilter}>
-                <SelectTrigger className="h-9 w-[160px]">
-                  <SelectValue placeholder="Status">
-                    {statusFilter === "all" ? (
-                      <span className="text-muted-foreground">All</span>
-                    ) : (
-                      <span className="inline-flex items-center gap-1.5">
-                        <span className={`h-2 w-2 rounded-full ${statusDotClass(statusFilter)}`} />
-                        <span className="truncate">{statusFilter}</span>
-                      </span>
-                    )}
-                  </SelectValue>
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All Statuses</SelectItem>
-                  {availableStatuses.map((status) => (
-                    <SelectItem key={status} value={status}>
-                      <span className="inline-flex items-center gap-2">
-                        <span className={`h-2.5 w-2.5 rounded-full ${statusDotClass(status)}`} />
-                        <span>{status}</span>
-                      </span>
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              {lookups && (
-                <>
-                  <Select
-                    value={filters.season_id?.toString() || "all"}
-                    onValueChange={(value) =>
-                      setFilters({ ...filters, season_id: value === "all" ? undefined : Number(value) })
-                    }
-                  >
-                    <SelectTrigger className="h-9 w-[140px]">
-                      <SelectValue placeholder="Season" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All Seasons</SelectItem>
-                      {availableSeasons.map((season) => (
-                        <SelectItem key={season.id} value={season.id.toString()}>
-                          {season.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+          <div className="mb-6 border-b pb-6 flex items-center justify-between gap-4">
+            <div className="flex items-center gap-3">
+              <Input
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Search by style number, name, or color..."
+                className="h-9 w-[320px]"
+              />
+              <div className="text-sm text-muted-foreground">
+                {hasActiveFilters ? "Filters applied" : "No active filters"}
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              
 
-                  <Select
-                    value={filters.brand_id?.toString() || "all"}
-                    onValueChange={(value) =>
-                      setFilters({ ...filters, brand_id: value === "all" ? undefined : Number(value) })
-                    }
-                  >
-                    <SelectTrigger className="h-9 w-[140px]">
-                      <SelectValue placeholder="Brand" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All Brands</SelectItem>
-                      {availableBrands.map((brand) => (
-                        <SelectItem key={brand.id} value={brand.id.toString()}>
-                          {brand.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
+              {activeSampleEntries.length > 0 && (
+                <div className="flex items-center gap-1.5">
+                  {visibleActiveEntries.map(({ sample, editors }) => {
+                    const editorNames = editors.map((person) => getPresenceName(person))
+                    const shownEditors = editors.slice(0, 3)
+                    const hiddenCount = Math.max(0, editors.length - shownEditors.length)
+                    return (
+                      <button
+                        key={`active-inline-${sample.id}`}
+                        type="button"
+                        onClick={() => navigate(`/samples/${sample.id}`)}
+                        title={`${sample.style_number}\n${editorNames.join("\n")}`}
+                        aria-label={`Open ${sample.style_number}`}
+                        className="inline-flex items-center -space-x-2 hover:opacity-90"
+                      >
+                        {shownEditors.map((person) => {
+                          const displayName = getPresenceName(person)
+                          return (
+                            <div
+                              key={`active-inline-avatar-${sample.id}-${person.user_id}`}
+                              title={displayName}
+                              className="flex h-7 w-7 items-center justify-center rounded-full border-2 border-background bg-primary/15 text-[9px] font-semibold text-primary shadow-sm"
+                            >
+                              {getInitials(displayName)}
+                            </div>
+                          )
+                        })}
+                        {hiddenCount > 0 && (
+                          <div className="flex h-7 w-7 items-center justify-center rounded-full border-2 border-background bg-muted text-[9px] font-semibold text-muted-foreground shadow-sm">
+                            +{hiddenCount}
+                          </div>
+                        )}
+                      </button>
+                    )
+                  })}
 
-                  <Select
-                    value={filters.division || "all"}
-                    onValueChange={(value) =>
-                      setFilters({ ...filters, division: value === "all" ? undefined : value })
-                    }
-                  >
-                    <SelectTrigger className="h-9 w-[140px]">
-                      <SelectValue placeholder="Division" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All Divisions</SelectItem>
-                      {availableDivisions.map((division) => (
-                        <SelectItem key={division} value={division}>
-                          {division}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-
-                  <Select
-                    value={filters.product_category || "all"}
-                    onValueChange={(value) =>
-                      setFilters({ ...filters, product_category: value === "all" ? undefined : value })
-                    }
-                  >
-                    <SelectTrigger className="h-9 w-[140px]">
-                      <SelectValue placeholder="Category" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All Categories</SelectItem>
-                      {availableCategories.map((category) => (
-                        <SelectItem key={category} value={category}>
-                          {category}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </>
+                  {activeSampleEntries.length >= 3 && (
+                    <Popover open={activeListOpen} onOpenChange={setActiveListOpen}>
+                      <PopoverTrigger asChild>
+                        <Button type="button" variant="ghost" size="sm" className="h-8 px-2 text-xs">
+                          {activeSampleEntries.length > 3 ? `Show more (${activeSampleEntries.length - 3})` : "Show more"}
+                        </Button>
+                      </PopoverTrigger>
+                      <PopoverContent align="end" className="w-[300px] p-2">
+                        <div className="space-y-1">
+                          {activeSampleEntries.map(({ sample, editors }) => {
+                            const peopleLabel = editors.map((p) => getPresenceName(p)).join(", ")
+                            return (
+                              <button
+                                key={`active-list-${sample.id}`}
+                                type="button"
+                                onClick={() => {
+                                  setActiveListOpen(false)
+                                  navigate(`/samples/${sample.id}`)
+                                }}
+                                className="flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left hover:bg-muted"
+                                title={peopleLabel}
+                              >
+                                <span className="text-xs font-medium text-foreground">{sample.style_number}</span>
+                                <span className="text-[11px] text-muted-foreground">{editors.length} active</span>
+                              </button>
+                            )
+                          })}
+                        </div>
+                      </PopoverContent>
+                    </Popover>
+                  )}
+                </div>
               )}
-              <Button
+
+              <Popover
+                open={filterOpen}
+                onOpenChange={(open) => {
+                  setFilterOpen(open)
+                }}
+              >
+                <Button
                 type="button"
                 variant="outline"
                 size="sm"
@@ -765,6 +865,183 @@ export default function SamplesListPage() {
               >
                 Clear filters
               </Button>
+                <PopoverTrigger asChild>
+                  <Button type="button" variant="outline" size="sm" className="h-9">
+                    <SlidersHorizontal className="h-4 w-4" />
+                    Filter
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent align="end" className="w-[360px] p-0">
+                  <div className="border-b px-4 py-3">
+                    <h3 className="text-sm font-semibold">Filter</h3>
+                  </div>
+
+                  <div className="space-y-4 p-4">
+                    <div className="space-y-2">
+                      <Label className="text-sm">Status</Label>
+                      <Select
+                        value={statusFilter}
+                        onValueChange={(value) => {
+                          setStatusFilter(value)
+                          setPage(1)
+                        }}
+                      >
+                        <SelectTrigger className="h-9 w-full">
+                          <SelectValue placeholder="Status">
+                            {statusFilter === "all" ? (
+                              <span className="text-muted-foreground">All</span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1.5">
+                                <span className={`h-2 w-2 rounded-full ${statusDotClass(statusFilter)}`} />
+                                <span className="truncate">{statusFilter}</span>
+                              </span>
+                            )}
+                          </SelectValue>
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">All Statuses</SelectItem>
+                          {availableStatuses.map((status) => (
+                            <SelectItem key={status} value={status}>
+                              <span className="inline-flex items-center gap-2">
+                                <span className={`h-2.5 w-2.5 rounded-full ${statusDotClass(status)}`} />
+                                <span>{status}</span>
+                              </span>
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label className="text-sm">Stage</Label>
+                      <Select
+                        value={stageFilter}
+                        onValueChange={(value) => {
+                          setStageFilter(value)
+                          setPage(1)
+                        }}
+                      >
+                        <SelectTrigger className="h-9 w-full">
+                          <SelectValue placeholder="Stage" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">All Stages</SelectItem>
+                          {availableStages.map((stage) => (
+                            <SelectItem key={stage.value} value={stage.value}>
+                              {stage.label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    {lookups && (
+                      <>
+                        <div className="space-y-2">
+                          <Label className="text-sm">Season</Label>
+                          <Select
+                            value={filters.season_id?.toString() || "all"}
+                            onValueChange={(value) => {
+                              setFilters((prev) => ({ ...prev, season_id: value === "all" ? undefined : Number(value) }))
+                              setPage(1)
+                            }}
+                          >
+                            <SelectTrigger className="h-9 w-full">
+                              <SelectValue placeholder="Season" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="all">All Seasons</SelectItem>
+                              {availableSeasons.map((season) => (
+                                <SelectItem key={season.id} value={season.id.toString()}>
+                                  {season.label}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+
+                        <div className="space-y-2">
+                          <Label className="text-sm">Brand</Label>
+                          <Select
+                            value={filters.brand_id?.toString() || "all"}
+                            onValueChange={(value) => {
+                              setFilters((prev) => ({ ...prev, brand_id: value === "all" ? undefined : Number(value) }))
+                              setPage(1)
+                            }}
+                          >
+                            <SelectTrigger className="h-9 w-full">
+                              <SelectValue placeholder="Brand" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="all">All Brands</SelectItem>
+                              {availableBrands.map((brand) => (
+                                <SelectItem key={brand.id} value={brand.id.toString()}>
+                                  {brand.name}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+
+                        <div className="space-y-2">
+                          <Label className="text-sm">Division</Label>
+                          <Select
+                            value={filters.division || "all"}
+                            onValueChange={(value) => {
+                              setFilters((prev) => ({ ...prev, division: value === "all" ? undefined : value }))
+                              setPage(1)
+                            }}
+                          >
+                            <SelectTrigger className="h-9 w-full">
+                              <SelectValue placeholder="Division" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="all">All Divisions</SelectItem>
+                              {availableDivisions.map((division) => (
+                                <SelectItem key={division} value={division}>
+                                  {division}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+
+                        <div className="space-y-2">
+                          <Label className="text-sm">Category</Label>
+                          <Select
+                            value={filters.product_category || "all"}
+                            onValueChange={(value) => {
+                              setFilters((prev) => ({ ...prev, product_category: value === "all" ? undefined : value }))
+                              setPage(1)
+                            }}
+                          >
+                            <SelectTrigger className="h-9 w-full">
+                              <SelectValue placeholder="Category" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="all">All Categories</SelectItem>
+                              {availableCategories.map((category) => (
+                                <SelectItem key={category} value={category}>
+                                  {category}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      </>
+                    )}
+                  </div>
+
+                  <div className="flex items-center justify-between border-t px-4 py-3">
+                    <Button type="button" variant="outline" size="sm" onClick={resetPanelFilters}>
+                      Reset all
+                    </Button>
+                    <Button type="button" size="sm" onClick={() => setFilterOpen(false)}>
+                      Done
+                    </Button>
+                  </div>
+                </PopoverContent>
+              </Popover>
             </div>
           </div>
 
@@ -825,7 +1102,7 @@ export default function SamplesListPage() {
                       )}
                       <th className="h-10 px-2 text-left align-middle font-medium text-muted-foreground">Style Number</th>
                       <th className="h-10 px-2 text-left align-middle font-medium text-muted-foreground">Style Name</th>
-                      <th className="h-10 px-2 text-left align-middle font-medium text-muted-foreground">Color</th>
+                      
                       <th className="h-10 px-2 text-left align-middle font-medium text-muted-foreground">Season</th>
                       <th className="h-10 px-2 text-left align-middle font-medium text-muted-foreground">Brand</th>
                       <th className="h-10 px-2 text-left align-middle font-medium text-muted-foreground">Division</th>
@@ -836,8 +1113,17 @@ export default function SamplesListPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {pagedSamples.map((sample) => (
-                      <tr key={sample.id} className="border-b transition-colors hover:bg-muted/50">
+                    {pagedSamples.map((sample) => {
+                      const activeEditors = getUniqueActiveEditors(sample.id)
+                      const hasActiveEditors = activeEditors.length > 0
+
+                      return (
+                      <tr
+                        key={sample.id}
+                        className={`border-b transition-colors ${
+                          hasActiveEditors ? "bg-primary/5 hover:bg-primary/10" : "hover:bg-muted/50"
+                        }`}
+                      >
                         {canEdit && (
                           <td className="h-12 px-2 align-middle" onClick={(e) => e.stopPropagation()}>
                             <Checkbox
@@ -848,7 +1134,7 @@ export default function SamplesListPage() {
                         )}
                         <td className="h-12 px-2 align-middle font-medium">{sample.style_number}</td>
                         <td className="h-12 px-2 align-middle">{sample.style_name || "-"}</td>
-                        <td className="h-12 px-2 align-middle">{sample.color || "-"}</td>
+                        
                         <td className="h-12 px-2 align-middle">
                           {sample.seasons ? `${sample.seasons.code || sample.seasons.name}` : "-"}
                         </td>
@@ -971,7 +1257,7 @@ export default function SamplesListPage() {
                           </div>
                         </td>
                       </tr>
-                    ))}
+                    )})}
                   </tbody>
                 </table>
               </div>
@@ -1317,6 +1603,37 @@ export default function SamplesListPage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <Dialog open={exportOpen} onOpenChange={setExportOpen}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Export Samples</DialogTitle>
+            <DialogDescription>Choose the file format for export.</DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-2 py-1">
+            <Label className="text-sm">Format</Label>
+            <Select value={exportFormat} onValueChange={(value) => setExportFormat(value as ExportFormat)}>
+              <SelectTrigger className="h-9 w-full">
+                <SelectValue placeholder="Format" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="xlsx">Excel (.xlsx)</SelectItem>
+                <SelectItem value="csv">CSV (.csv)</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setExportOpen(false)} disabled={exporting}>
+              Cancel
+            </Button>
+            <Button type="button" onClick={onExport} disabled={exporting}>
+              {exporting ? "Exporting..." : "Export"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
