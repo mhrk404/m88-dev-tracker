@@ -754,7 +754,7 @@ export default function SampleStageEditPage() {
     setShowConfirm(false)
     setError(null)
 
-    const DELAY = 7
+    const DELAY = 3
     let remaining = DELAY
     let cancelled = false
 
@@ -1460,7 +1460,7 @@ export default function SampleStageEditPage() {
           <AlertDialogHeader>
             <AlertDialogTitle>Confirm update</AlertDialogTitle>
             <AlertDialogDescription>
-              Update <span className="font-medium text-foreground">{currentStage ? (STAGE_LABELS[currentStage] ?? currentStage) : "stage"}</span> data? You have 7 seconds to undo.
+              Update <span className="font-medium text-foreground">{currentStage ? (STAGE_LABELS[currentStage] ?? currentStage) : "stage"}</span> data? You have 3 seconds to undo.
               {currentStage && getNextStage(currentStage) && canAdvanceStage() && (
                 <div className="mt-2 text-sm text-foreground">
                   You can advance to <span className="font-medium">{STAGE_LABELS[getNextStage(currentStage)!] ?? getNextStage(currentStage)}</span>.
