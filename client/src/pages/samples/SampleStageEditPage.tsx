@@ -479,6 +479,11 @@ export default function SampleStageEditPage() {
     const errs: Record<string, string> = {}
 
     for (const f of fields) {
+      // Skip validation for read-only assignment fields for non-admin users
+      if (!isAdmin && stageRoleConfig?.assignmentKey === f.key) {
+        continue
+      }
+
       const v = formValues[f.key]
       const hasValue = v !== undefined && v !== null && String(v).trim() !== ""
 
@@ -554,7 +559,14 @@ export default function SampleStageEditPage() {
     return currentValue !== initialValue
   }, [stageRoleUserId, initialStageRoleUserId])
 
-  const canSave = validationState.canSubmit || (!validationState.hasStageFieldChanges && hasRoleChange)
+  const canSave = useMemo(() => {
+    // Admin users can only save if they make field changes or role changes
+    if (isAdmin) {
+      return validationState.canSubmit || (!validationState.hasStageFieldChanges && hasRoleChange)
+    }
+    // Non-admin users can save if there are no validation errors (allows them to confirm/review stage)
+    return Object.keys(validationState.fieldErrors).length === 0
+  }, [isAdmin, validationState.canSubmit, validationState.fieldErrors, hasRoleChange])
 
   const withSelectedUser = useCallback((usersList: User[], selectedUserId: string | undefined): User[] => {
     if (!selectedUserId) return usersList
@@ -690,8 +702,14 @@ export default function SampleStageEditPage() {
       return false
     }
 
-    if (validationState.hasStageFieldChanges) return canSubmit
-    return hasRoleChange
+    // For admin users
+    if (isAdmin) {
+      if (validationState.hasStageFieldChanges) return canSubmit
+      return hasRoleChange
+    }
+
+    // For non-admin users, allow save if there are no validation errors
+    return true
   }
 
   function canAdvanceStage(): boolean {
@@ -747,7 +765,8 @@ export default function SampleStageEditPage() {
     const sampleId = id
     const stage = currentStage
     const payload = stagePayloadFromForm(stage, formValues as unknown as Record<string, unknown>)
-    const shouldSaveStage = moveToNext || validationState.hasStageFieldChanges
+    // Non-admin users should always be able to confirm their stage, even without changes
+    const shouldSaveStage = moveToNext || validationState.hasStageFieldChanges || !isAdmin
     const stageLabel = STAGE_LABELS[stage] ?? stage
     const nextStage = getNextStage(stage)
 
